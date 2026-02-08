@@ -109,3 +109,34 @@ model ChangeLog {
   payload             Json
   createdAt           DateTime @default(now())
 }
+
+model ScrapeJob {
+  id                  String   @id @default(uuid())
+  source              String
+  mode                String   // "seed_registry" | "user_targeted"
+  query               String?  // natural-language or keyword query for Firecrawl map discovery
+  status              String   @default("active") // "active" | "paused"
+  targetCount         Int      @default(200)
+  discoveredCount     Int      @default(0)
+  ingestedCount       Int      @default(0)
+  canonicalAddedCount Int      @default(0)
+  cursorJson          Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([source, status])
+}
+
+model SavedSearch {
+  id               String   @id @default(uuid())
+  name             String
+  prompt           String
+  maxRent          Int?
+  minBeds          Float?
+  borough          String?
+  neighborhood     String?
+  noFeePreferred   Boolean?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
