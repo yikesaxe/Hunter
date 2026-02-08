@@ -6,32 +6,56 @@ import { SourceAdapter } from "../adapters/SourceAdapter";
 
 const PARSE_VERSION = "1.0.0";
 
+export interface IngestOptions {
+  /** Cap the number of discovered listings to process per adapter */
+  limit?: number;
+}
+
 /**
  * Run the full ingestion pipeline for a list of adapters.
  * For each adapter: discover -> fetch -> store raw -> parse -> upsert normalized.
  * Idempotent: re-running won't create duplicates (upsert on source+sourceUrl).
  */
-export async function ingestAll(adapters: SourceAdapter[]): Promise<void> {
+export async function ingestAll(
+  adapters: SourceAdapter[],
+  opts: IngestOptions = {}
+): Promise<void> {
   for (const adapter of adapters) {
     console.log(`\n[ingest] Starting adapter: ${adapter.name}`);
-    await ingestAdapter(adapter);
+    await ingestAdapter(adapter, opts);
   }
 }
 
-async function ingestAdapter(adapter: SourceAdapter): Promise<void> {
+export async function ingestAdapter(
+  adapter: SourceAdapter,
+  opts: IngestOptions = {}
+): Promise<void> {
   const discovered = await adapter.discover();
-  console.log(`[ingest] ${adapter.name}: discovered ${discovered.length} listings`);
+  const toProcess = opts.limit
+    ? discovered.slice(0, opts.limit)
+    : discovered;
+  console.log(
+    `[ingest] ${adapter.name}: discovered ${discovered.length} listings` +
+      (opts.limit ? `, processing first ${toProcess.length}` : "")
+  );
 
-  for (const listing of discovered) {
+  let success = 0;
+  let errors = 0;
+  for (const listing of toProcess) {
     try {
       await ingestOne(adapter, listing.url, listing.sourceListingId);
+      success++;
     } catch (err) {
+      errors++;
       console.error(
         `[ingest] ${adapter.name}: error processing ${listing.url}:`,
         err
       );
     }
   }
+  console.log(
+    `[ingest] ${adapter.name}: finished — ${success} success, ${errors} errors`
+  );
 }
 
 /**
