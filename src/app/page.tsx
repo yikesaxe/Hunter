@@ -68,8 +68,18 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Hunter</h1>
-        <p className="text-gray-500 mb-6">NYC Apartment Listings Aggregator</p>
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Hunter</h1>
+            <p className="text-gray-500">NYC Apartment Listings Aggregator</p>
+          </div>
+          <Link
+            href="/import"
+            className="bg-gray-100 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-200 transition-colors"
+          >
+            Import StreetEasy
+          </Link>
+        </div>
 
         {/* Search Form */}
         <form
