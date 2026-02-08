@@ -14,6 +14,7 @@ const MAP_COOLDOWN_MS = 2000; // 2 seconds between map calls
 const SOURCE_PATTERNS: Record<string, RegExp> = {
   leasebreak: /\/short-term-rental-details\/\d+\//,
   streeteasy: /\/building\/[a-z0-9_-]+\/[a-z0-9_-]+$/i,
+  renthop: /\/listings\/[a-z0-9-]+\/[a-z0-9-]+\/\d+/i,
 };
 
 export interface MapOptions {

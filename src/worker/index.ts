@@ -10,6 +10,7 @@ import { mockStreetEasyAdapter } from "./adapters/mockStreetEasy";
 import { mockCraigslistAdapter } from "./adapters/mockCraigslist";
 import { leasebreakAdapter } from "./adapters/leasebreak";
 import { streeteasyAdapter } from "./adapters/streeteasy";
+import { renthopAdapter } from "./adapters/renthop";
 import { parseStreetEasyHtml } from "./adapters/streeteasyImport";
 import { SourceAdapter } from "./adapters/SourceAdapter";
 import { prisma } from "@/lib/prisma";
@@ -215,6 +216,12 @@ async function main() {
     adapters = [streeteasyAdapter];
   } else if (source === "leasebreak") {
     adapters = [leasebreakAdapter];
+  } else if (source === "renthop") {
+    if (!process.env.FIRECRAWL_API_KEY) {
+      console.error("\n[worker] RentHop requires FIRECRAWL_API_KEY in .env");
+      process.exit(1);
+    }
+    adapters = [renthopAdapter];
   } else if (source === "mock") {
     adapters = MOCK_ADAPTERS;
   } else if (source === "streeteasyImport") {
@@ -228,12 +235,12 @@ async function main() {
   } else if (!source) {
     adapters = [...MOCK_ADAPTERS, leasebreakAdapter];
     if (process.env.FIRECRAWL_API_KEY) {
-      adapters.push(streeteasyAdapter);
+      adapters.push(streeteasyAdapter, renthopAdapter);
     }
   } else {
     console.error(`[worker] Unknown source: ${source}`);
     console.error(
-      "[worker] Available sources: streeteasy, leasebreak, mock, streeteasyImport"
+      "[worker] Available sources: streeteasy, leasebreak, renthop, mock, streeteasyImport"
     );
     console.error(
       "[worker] Available modes: registry, user-targeted"

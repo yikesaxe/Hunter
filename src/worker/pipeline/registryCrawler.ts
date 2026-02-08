@@ -15,6 +15,7 @@ import { dedupeAndUpsertCanonical } from "./dedupe";
 import { updateFreshness } from "./freshness";
 import { leasebreakAdapter } from "../adapters/leasebreak";
 import { streeteasyAdapter } from "../adapters/streeteasy";
+import { renthopAdapter } from "../adapters/renthop";
 import { SourceAdapter } from "../adapters/SourceAdapter";
 
 /** Discovery queries per source */
@@ -31,6 +32,11 @@ const DISCOVERY_CONFIGS: Record<
     url: "https://streeteasy.com",
     search: "building apartment for rent rental listing",
     adapter: streeteasyAdapter,
+  },
+  renthop: {
+    url: "https://www.renthop.com",
+    search: "listing apartment rental NYC bedroom",
+    adapter: renthopAdapter,
   },
 };
 

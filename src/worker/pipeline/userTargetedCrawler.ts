@@ -9,6 +9,7 @@ import { dedupeAndUpsertCanonical } from "./dedupe";
 import { updateFreshness } from "./freshness";
 import { leasebreakAdapter } from "../adapters/leasebreak";
 import { streeteasyAdapter } from "../adapters/streeteasy";
+import { renthopAdapter } from "../adapters/renthop";
 import { SourceAdapter } from "../adapters/SourceAdapter";
 
 const SOURCES: Record<string, { url: string; adapter: SourceAdapter }> = {
@@ -19,6 +20,10 @@ const SOURCES: Record<string, { url: string; adapter: SourceAdapter }> = {
   streeteasy: {
     url: "https://streeteasy.com",
     adapter: streeteasyAdapter,
+  },
+  renthop: {
+    url: "https://www.renthop.com",
+    adapter: renthopAdapter,
   },
 };
 
