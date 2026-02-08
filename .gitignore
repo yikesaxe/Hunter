@@ -17,6 +17,9 @@ generated/
 dist/
 build/
 
+# user-imported listing HTML files
+imports/
+
 # misc
 .DS_Store
 *.tsbuildinfo
