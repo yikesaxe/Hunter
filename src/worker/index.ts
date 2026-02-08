@@ -7,6 +7,7 @@ import { updateFreshness } from "./pipeline/freshness";
 import { mockStreetEasyAdapter } from "./adapters/mockStreetEasy";
 import { mockCraigslistAdapter } from "./adapters/mockCraigslist";
 import { leasebreakAdapter } from "./adapters/leasebreak";
+import { streeteasyAdapter } from "./adapters/streeteasy";
 import { parseStreetEasyHtml } from "./adapters/streeteasyImport";
 import { SourceAdapter } from "./adapters/SourceAdapter";
 import { prisma } from "@/lib/prisma";
@@ -165,22 +166,20 @@ async function main() {
 
   console.log("=== Hunter Worker Starting ===");
 
-  if (source === "streeteasy") {
-    console.error(
-      "\n[worker] StreetEasy crawling is disabled (robots.txt restrictions)."
-    );
-    console.error(
-      "[worker] Use the import endpoint instead: POST /api/import/streeteasy"
-    );
-    console.error(
-      "[worker] Or use --source streeteasyImport to import from /imports/streeteasy/*.html"
-    );
-    process.exit(1);
-  }
-
   let adapters: SourceAdapter[];
 
-  if (source === "leasebreak") {
+  if (source === "streeteasy") {
+    if (!process.env.FIRECRAWL_API_KEY) {
+      console.error(
+        "\n[worker] StreetEasy requires FIRECRAWL_API_KEY in .env"
+      );
+      console.error(
+        "[worker] Or use --source streeteasyImport to import from /imports/streeteasy/*.html"
+      );
+      process.exit(1);
+    }
+    adapters = [streeteasyAdapter];
+  } else if (source === "leasebreak") {
     adapters = [leasebreakAdapter];
   } else if (source === "mock") {
     adapters = MOCK_ADAPTERS;
@@ -196,10 +195,13 @@ async function main() {
   } else if (!source) {
     // Default: run all automated sources
     adapters = [...MOCK_ADAPTERS, leasebreakAdapter];
+    if (process.env.FIRECRAWL_API_KEY) {
+      adapters.push(streeteasyAdapter);
+    }
   } else {
     console.error(`[worker] Unknown source: ${source}`);
     console.error(
-      "[worker] Available sources: leasebreak, mock, streeteasyImport"
+      "[worker] Available sources: streeteasy, leasebreak, mock, streeteasyImport"
     );
     process.exit(1);
   }
