@@ -1,229 +1,268 @@
 /**
- * StreetEasy Import Adapter — parse-only (no crawling).
+ * StreetEasy Import Adapter — parse-only (no direct crawling).
  *
  * StreetEasy's robots.txt disallows automated access to /rental/* paths.
- * This adapter only parses HTML that a user provides (via paste or file drop).
- * It does NOT implement discover() or fetch() for automated crawling.
+ * This adapter parses HTML that arrives via:
+ *   1. Firecrawl API (user provides URL, we fetch via Firecrawl)
+ *   2. User paste (user copies page source manually)
+ *   3. Chrome extension (captures DOM from user's browser)
+ *
+ * It does NOT directly fetch from streeteasy.com.
  */
 import { NormalizedListingInput } from "@/lib/domain/types";
 import { loadHtml } from "../html/cheerio";
-import { parseText, parseMoney, parseNumber, parseAllAttr } from "../html/parse";
-
-/**
- * Normalize borough names from StreetEasy URL paths or text.
- */
-function normalizeBoroughName(raw: string): string {
-  const map: Record<string, string> = {
-    manhattan: "Manhattan",
-    brooklyn: "Brooklyn",
-    queens: "Queens",
-    bronx: "Bronx",
-    "staten-island": "Staten Island",
-    "staten island": "Staten Island",
-  };
-  return map[raw.toLowerCase().trim()] ?? raw.trim();
-}
+import { parseMoney, parseNumber } from "../html/parse";
+import { FirecrawlMetadata } from "../http/firecrawl";
 
 /**
  * Try to extract a listing ID from a StreetEasy URL.
- * e.g. https://streeteasy.com/rental/1234567 -> "1234567"
+ * e.g. https://streeteasy.com/building/350-east-52nd-street-new_york/2g -> "350-east-52nd-street-new_york/2g"
  */
 export function extractListingId(url: string): string | undefined {
-  const match = url.match(/\/rental\/(\d+)/);
+  const match = url.match(/streeteasy\.com\/(?:building|rental)\/(.+?)(?:\?|$)/);
   return match ? match[1] : undefined;
 }
 
 /**
- * Parse StreetEasy page source HTML into a NormalizedListingInput.
- * Best-effort: tries multiple selector strategies since SE HTML varies.
+ * Parse StreetEasy page HTML into a NormalizedListingInput.
+ * Tested against real Firecrawl-captured HTML from Feb 2026.
+ *
+ * @param firecrawlMeta - optional metadata from Firecrawl API response
+ *   (has richer data than the HTML alone: og:title, geo coords, images)
  */
 export function parseStreetEasyHtml(
   html: string,
-  meta: { url: string; sourceListingId?: string }
+  meta: { url: string; sourceListingId?: string },
+  firecrawlMeta?: FirecrawlMetadata
 ): NormalizedListingInput & { title: string } {
   const $ = loadHtml(html);
 
-  // --- Title / Address ---
-  // Try multiple strategies
+  // --- Address / Title ---
+  // H1 contains "350 East 52nd Street #2G"
+  // Firecrawl's HTML often has empty <title>, so use metadata title as fallback
+  const fcTitleStr = typeof (firecrawlMeta?.title || firecrawlMeta?.["og:title"]) === "string"
+    ? ((firecrawlMeta?.title || firecrawlMeta?.["og:title"]) as string)
+      .replace(/\s*\|.*$/, "")
+      .replace(/\s*in\s+\w.*$/, "")
+    : "";
+
   let title =
-    parseText($, '[data-testid="listing-title"]') ||
-    parseText($, ".listing-title h1") ||
-    parseText($, "h1") ||
-    parseText($, "title")?.replace(/\s*\|.*$/, "")?.replace(/\s*-\s*StreetEasy.*$/i, "") ||
+    $("h1").first().text().trim() ||
+    $("title").text().trim().replace(/\s*\|.*$/, "").replace(/\s*in\s+.*$/, "") ||
+    fcTitleStr ||
     "Unknown";
 
-  // Often the title IS the address on StreetEasy
-  let address = title;
-
-  // Try to extract a more specific address
-  const specificAddress =
-    parseText($, '[data-testid="listing-address"]') ||
-    parseText($, ".listing-title__address") ||
-    parseText($, ".building-title a") ||
-    parseText($, '[class*="DetailAddress"]');
-  if (specificAddress) {
-    address = specificAddress;
-    if (!title || title === "Unknown") title = specificAddress;
+  // Parse address and unit from H1 like "350 East 52nd Street #2G"
+  let address: string | null = title;
+  let unit: string | null = null;
+  const unitMatch = title.match(/\s*#(\w+)\s*$/);
+  if (unitMatch) {
+    unit = unitMatch[1];
+    address = title.replace(/\s*#\w+\s*$/, "").trim();
   }
 
-  // --- Unit ---
-  let unit: string | null =
-    parseText($, '[data-testid="listing-unit"]') ||
-    parseText($, ".listing-title__unit");
-  // Sometimes the unit is in the title like "Unit 3A at 123 Main St"
-  if (!unit && title) {
-    const unitMatch = title.match(/(?:unit|apt|#)\s*(\w+)/i);
-    if (unitMatch) unit = unitMatch[1];
+  // More specific address from building section
+  const buildingAddr = $(".AboutBuildingSection_address__TdYEX, [class*='AboutBuildingSection_address']")
+    .first()
+    .text()
+    .trim();
+  if (buildingAddr && buildingAddr.length > 5) {
+    // This has full address with city/state: "350 East 52nd Street, New York, NY 10022"
+    // Keep just the street address part
+    const streetPart = buildingAddr.split(",")[0].trim();
+    if (streetPart) address = streetPart;
   }
+
+  // Pre-compute full page text for searches
+  const pageText = $.text().toLowerCase();
 
   // --- Neighborhood / Borough ---
   let neighborhood: string | null = null;
   let borough: string | null = null;
 
-  // Try breadcrumbs
-  const breadcrumbs = $("nav a, .Breadcrumb a, [class*='breadcrumb'] a, [class*='Breadcrumb'] a")
-    .map((_, el) => $(el).text().trim())
-    .get()
-    .filter((t) => t.length > 0 && t.length < 50);
+  // Try Firecrawl og:title first: "350 East 52nd Street #2G in Turtle Bay, Manhattan | StreetEasy"
+  const ogTitle = firecrawlMeta?.["og:title"] || firecrawlMeta?.title || "";
+  const fcTitle = typeof ogTitle === "string" ? ogTitle : "";
+  const locationMatch = fcTitle.match(/in\s+([^,|]+),\s*(Manhattan|Brooklyn|Queens|Bronx|Staten Island)/i);
+  if (locationMatch) {
+    neighborhood = locationMatch[1].trim();
+    borough = locationMatch[2].trim();
+  }
 
-  if (breadcrumbs.length >= 2) {
-    // Typically: Home > Borough > Neighborhood > ...
-    for (const crumb of breadcrumbs) {
-      const lower = crumb.toLowerCase();
-      if (["manhattan", "brooklyn", "queens", "bronx", "staten island"].includes(lower)) {
-        borough = normalizeBoroughName(crumb);
-      } else if (!["home", "nyc", "new york", "rentals", "for rent"].includes(lower) && !borough) {
-        // Could be neighborhood
+  // Fallback: try title tag from HTML
+  if (!neighborhood) {
+    const titleTag = $("title").text().trim();
+    const htmlLocationMatch = titleTag.match(/in\s+([^,|]+),\s*(Manhattan|Brooklyn|Queens|Bronx|Staten Island)/i);
+    if (htmlLocationMatch) {
+      neighborhood = htmlLocationMatch[1].trim();
+      borough = htmlLocationMatch[2].trim();
+    }
+  }
+
+  // Fallback: try the neighborhood link in building summary
+  if (!neighborhood) {
+    const nhLink = $("[class*='BuildingSummaryList_listItem']")
+      .first()
+      .text()
+      .trim();
+    if (nhLink && nhLink.length < 40) neighborhood = nhLink;
+  }
+
+  // Fallback: try "Explore <Neighborhood>" heading
+  if (!neighborhood) {
+    $("[class*='ExploreNeigborhoods_heading'], h2").each((_, el) => {
+      const text = $(el).text().trim();
+      const exploreMatch = text.match(/Explore\s+(.+)/);
+      if (exploreMatch && !neighborhood) {
+        neighborhood = exploreMatch[1].trim();
+      }
+    });
+  }
+
+  // Fallback: extract borough from page text
+  if (!borough) {
+    const boroughs = ["Manhattan", "Brooklyn", "Queens", "Bronx", "Staten Island"];
+    for (const b of boroughs) {
+      if (pageText.includes(b.toLowerCase() + " rental")) {
+        borough = b;
+        break;
       }
     }
   }
 
-  // Try from URL
-  if (!borough) {
-    const urlMatch = meta.url.match(
-      /streeteasy\.com\/(?:rental|building)\/[^/]+\/(manhattan|brooklyn|queens|bronx|staten-island)/i
-    );
-    if (urlMatch) borough = normalizeBoroughName(urlMatch[1]);
-  }
-
-  // Try from meta tags or structured data
-  const neighborhoodText =
-    parseText($, '[data-testid="listing-neighborhood"]') ||
-    parseText($, ".listing-neighborhood") ||
-    parseText($, '[class*="neighborhood"]');
-  if (neighborhoodText) {
-    const parts = neighborhoodText.split(",").map((s) => s.trim());
-    if (parts.length >= 2) {
-      neighborhood = parts[0];
-      if (!borough) borough = normalizeBoroughName(parts[parts.length - 1]);
-    } else {
-      neighborhood = parts[0];
-    }
-  }
-
   // --- Rent ---
-  let rentGross: number | null = null;
+  // Price is in an H4 with PriceInfo_price class
+  const priceText = $("[class*='PriceInfo_price']").first().text().trim();
+  let rentGross = parseMoney(priceText);
 
-  // Try specific selectors
-  const priceText =
-    parseText($, '[data-testid="price"]') ||
-    parseText($, ".price") ||
-    parseText($, '[class*="Price"]') ||
-    parseText($, ".details_info_price") ||
-    parseText($, ".price--rental");
-  rentGross = parseMoney(priceText);
-
-  // Fallback: look for a prominent dollar amount
+  // Fallback: first prominent dollar amount
   if (rentGross === null) {
-    const allText = $.text();
-    const priceMatch = allText.match(/\$\s*([\d,]+)\s*(?:\/\s*mo|per\s*month)?/);
-    if (priceMatch) {
-      rentGross = parseMoney(`$${priceMatch[1]}`);
-    }
+    $("h4, h3, h2").each((_, el) => {
+      if (rentGross !== null) return;
+      const text = $(el).text().trim();
+      const amount = parseMoney(text);
+      if (amount && amount > 500 && amount < 100000) {
+        rentGross = amount;
+      }
+    });
   }
 
   // --- Net Effective Rent ---
   let rentNetEffective: number | null = null;
-  const netEffectiveText =
-    parseText($, '[class*="net-effective"]') ||
-    parseText($, '[class*="NetEffective"]');
-  if (netEffectiveText) {
-    rentNetEffective = parseMoney(netEffectiveText);
-  }
+  $("p").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.includes("net effective")) {
+      rentNetEffective = parseMoney(text);
+    }
+  });
 
   // --- Bedrooms / Bathrooms ---
   let bedrooms: number | null = null;
   let bathrooms: number | null = null;
 
-  // Try data attributes and common selectors
-  const bedsText =
-    parseText($, '[data-testid="beds"]') ||
-    parseText($, ".detail_cell--beds") ||
-    parseText($, '[class*="bed"]');
-  const bathsText =
-    parseText($, '[data-testid="baths"]') ||
-    parseText($, ".detail_cell--baths") ||
-    parseText($, '[class*="bath"]');
-
-  if (bedsText) {
-    if (/studio/i.test(bedsText)) {
+  $("p").each((_, el) => {
+    const text = $(el).text().trim().toLowerCase();
+    if (text.match(/^\d+\s*bed/)) {
+      bedrooms = parseNumber(text.match(/(\d+)/)?.[1] ?? null);
+    } else if (text === "studio") {
       bedrooms = 0;
-    } else {
-      bedrooms = parseNumber(bedsText.replace(/[^0-9.]/g, ""));
+    } else if (text.match(/^\d+\.?\d*\s*bath/)) {
+      bathrooms = parseNumber(text.match(/([\d.]+)/)?.[1] ?? null);
     }
-  }
-  if (bathsText) {
-    bathrooms = parseNumber(bathsText.replace(/[^0-9.]/g, ""));
-  }
+  });
 
-  // Fallback: try to find "X bed / Y bath" pattern in text
+  // Fallback from full page text
   if (bedrooms === null) {
-    const bedMatch = $.text().match(/(\d+)\s*(?:bed(?:room)?s?|br)/i);
+    const bedMatch = $.text().match(/(\d+)\s*bed/i);
     if (bedMatch) bedrooms = parseNumber(bedMatch[1]);
-    else if (/studio/i.test($.text().slice(0, 2000))) bedrooms = 0;
+    else if (/studio/i.test($.text().slice(0, 3000))) bedrooms = 0;
   }
   if (bathrooms === null) {
-    const bathMatch = $.text().match(/([\d.]+)\s*(?:bath(?:room)?s?|ba)/i);
+    const bathMatch = $.text().match(/([\d.]+)\s*bath/i);
     if (bathMatch) bathrooms = parseNumber(bathMatch[1]);
   }
 
   // --- Broker Fee ---
   let brokerFee: boolean | null = null;
-  const feeText = $.text().toLowerCase();
-  if (feeText.includes("no fee") || feeText.includes("no broker fee")) {
+  if (pageText.includes("can't be charged a broker fee") || pageText.includes("no fee")) {
     brokerFee = false;
-  } else if (feeText.includes("broker fee") || feeText.includes("with fee")) {
+  } else if (pageText.includes("broker fee") && !pageText.includes("can't be charged")) {
     brokerFee = true;
   }
 
   // --- Description ---
-  const description =
-    parseText($, '[data-testid="listing-description"]') ||
-    parseText($, ".listing-description") ||
-    parseText($, '[class*="Description"]') ||
-    parseText($, ".description") ||
-    null;
+  let description: string | null = null;
+  // Find the longest paragraph that looks like a listing description
+  $("p").each((_, el) => {
+    const text = $(el).text().trim();
+    if (
+      text.length > 100 &&
+      !text.includes("Similar Homes") &&
+      !text.includes("net effective") &&
+      !text.includes("Listing by") &&
+      (description === null || text.length > (description?.length || 0))
+    ) {
+      description = text;
+    }
+  });
+
+  // --- Geo coordinates ---
+  let lat: number | null = null;
+  let lng: number | null = null;
+  // Prefer Firecrawl metadata (always has it from SE's meta tags)
+  const geoStr =
+    firecrawlMeta?.["geo.position"] ||
+    firecrawlMeta?.ICBM ||
+    $('meta[name="geo.position"]').attr("content") ||
+    $('meta[name="ICBM"]').attr("content");
+  if (typeof geoStr === "string" && geoStr) {
+    const [latStr, lngStr] = geoStr.split(/[;,]/).map((s) => s.trim());
+    lat = parseFloat(latStr) || null;
+    lng = parseFloat(lngStr) || null;
+  }
 
   // --- Images ---
   const images: string[] = [];
-  // Try og:image meta tags first
-  $('meta[property="og:image"]').each((_, el) => {
-    const content = $(el).attr("content");
-    if (content) images.push(content);
-  });
-  // Try img tags with streeteasy image URLs
+  // Prefer Firecrawl metadata og:image (clean array of full URLs)
+  const fcImages = firecrawlMeta?.["og:image"];
+  if (Array.isArray(fcImages)) {
+    images.push(...fcImages);
+  } else if (typeof fcImages === "string" && fcImages) {
+    images.push(fcImages);
+  }
+  // Fallback: HTML meta tags
+  if (images.length === 0) {
+    $('meta[property="og:image"]').each((_, el) => {
+      const content = $(el).attr("content");
+      if (content) images.push(content);
+    });
+  }
+  // Fallback: img tags
   if (images.length === 0) {
     $("img").each((_, el) => {
-      const src = $(el).attr("src") || $(el).attr("data-src") || "";
+      const src = $(el).attr("src") || "";
       if (
-        (src.includes("streeteasy") || src.includes("imgix")) &&
+        (src.includes("zillowstatic") || src.includes("streeteasy")) &&
         !src.includes("logo") &&
-        !src.includes("icon")
+        !src.includes("icon") &&
+        !src.includes("avatar")
       ) {
         images.push(src);
       }
     });
   }
+
+  // --- Elevator / Doorman from page text ---
+  let elevator: boolean | null = null;
+  let doorman: boolean | null = null;
+  let laundry: string | null = null;
+
+  if (pageText.includes("elevator")) elevator = true;
+  if (pageText.includes("doorman")) doorman = true;
+  if (pageText.includes("laundry in building") || pageText.includes("on-site laundry"))
+    laundry = "in_building";
+  if (pageText.includes("washer/dryer in unit") || pageText.includes("in-unit laundry"))
+    laundry = "in_unit";
 
   return {
     source: "streeteasy",
@@ -234,8 +273,8 @@ export function parseStreetEasyHtml(
     unit,
     neighborhood,
     borough,
-    lat: null,
-    lng: null,
+    lat,
+    lng,
     rentGross,
     rentNetEffective,
     bedrooms,
@@ -244,9 +283,9 @@ export function parseStreetEasyHtml(
     leaseTermMonths: null,
     moveInCostNotes: null,
     petPolicy: null,
-    laundry: null,
-    elevator: null,
-    doorman: null,
+    laundry,
+    elevator,
+    doorman,
     images,
   };
 }

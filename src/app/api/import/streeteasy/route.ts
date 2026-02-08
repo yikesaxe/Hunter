@@ -5,6 +5,7 @@ import {
   extractListingId,
 } from "@/worker/adapters/streeteasyImport";
 import { dedupeAndUpsertCanonical } from "@/worker/pipeline/dedupe";
+import { fetchViaFirecrawl } from "@/worker/http/firecrawl";
 
 // TODO: Flowglad subscription guard — check pro features access here
 
@@ -25,11 +26,9 @@ export async function OPTIONS() {
 /**
  * POST /api/import/streeteasy
  *
- * Accept user-provided StreetEasy page HTML for import.
- * This respects StreetEasy's robots.txt by never crawling — the user
- * copies the page source themselves.
- *
- * Body: { url: string, html: string }
+ * Two modes:
+ *   1. { url, html } — user provides the HTML directly (paste / extension)
+ *   2. { url } — fetch HTML via Firecrawl API (requires FIRECRAWL_API_KEY in .env)
  */
 export async function POST(request: NextRequest) {
   let body: { url?: string; html?: string };
@@ -39,30 +38,61 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json(
       { error: "Invalid JSON body" },
-      { status: 400 }
+      { status: 400, headers: CORS_HEADERS }
     );
   }
 
-  const { url, html } = body;
+  const { url } = body;
+  let { html } = body;
 
   if (!url || typeof url !== "string") {
     return NextResponse.json(
       { error: "Missing or invalid 'url' field" },
-      { status: 400 }
+      { status: 400, headers: CORS_HEADERS }
     );
+  }
+
+  // If no HTML provided, try fetching via Firecrawl
+  let firecrawlMeta: Record<string, unknown> | undefined;
+
+  if (!html) {
+    const apiKey = process.env.FIRECRAWL_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          error:
+            "No HTML provided and FIRECRAWL_API_KEY not configured. Either paste HTML or set the API key in .env",
+        },
+        { status: 400, headers: CORS_HEADERS }
+      );
+    }
+
+    try {
+      const result = await fetchViaFirecrawl(url, apiKey);
+      html = result.html;
+      firecrawlMeta = result.metadata;
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error: "Failed to fetch via Firecrawl",
+          details: err instanceof Error ? err.message : String(err),
+        },
+        { status: 502, headers: CORS_HEADERS }
+      );
+    }
   }
 
   if (!html || typeof html !== "string") {
     return NextResponse.json(
-      { error: "Missing or invalid 'html' field" },
-      { status: 400 }
+      { error: "No HTML content available" },
+      { status: 400, headers: CORS_HEADERS }
     );
   }
 
   if (html.length > MAX_HTML_SIZE) {
     return NextResponse.json(
       { error: `HTML exceeds maximum size of ${MAX_HTML_SIZE / 1024 / 1024}MB` },
-      { status: 413 }
+      { status: 413, headers: CORS_HEADERS }
     );
   }
 
@@ -95,8 +125,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 2. Parse HTML
-    const parsed = parseStreetEasyHtml(html, { url, sourceListingId });
+    // 2. Parse HTML (with optional Firecrawl metadata for richer extraction)
+    const parsed = parseStreetEasyHtml(html, { url, sourceListingId }, firecrawlMeta);
 
     // 3. Store extractedJson
     await prisma.rawListing.update({
@@ -175,12 +205,16 @@ export async function POST(request: NextRequest) {
         parsed: {
           title: parsed.title,
           address: parsed.address,
+          unit: parsed.unit,
           neighborhood: parsed.neighborhood,
           borough: parsed.borough,
           rentGross: parsed.rentGross,
+          rentNetEffective: parsed.rentNetEffective,
           bedrooms: parsed.bedrooms,
           bathrooms: parsed.bathrooms,
           brokerFee: parsed.brokerFee,
+          lat: parsed.lat,
+          lng: parsed.lng,
         },
       },
       { headers: CORS_HEADERS }
