@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 340px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 16px;
+      color: #1a1a1a;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 16px;
+    }
+    .status {
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .status.info { background: #eff6ff; color: #1e40af; }
+    .status.success { background: #f0fdf4; color: #166534; }
+    .status.error { background: #fef2f2; color: #991b1b; }
+    .status.warning { background: #fffbeb; color: #92400e; }
+    .result { font-size: 12px; margin-top: 8px; line-height: 1.5; }
+    .result strong { display: inline-block; width: 80px; color: #444; }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button.primary {
+      background: #2563eb;
+      color: white;
+    }
+    button.primary:hover { background: #1d4ed8; }
+    button.primary:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+    .settings {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #888;
+    }
+    .settings input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Hunter</h1>
+  <p class="subtitle">StreetEasy Listing Importer</p>
+
+  <div id="status" class="status info">
+    Checking if you're on a StreetEasy listing page...
+  </div>
+
+  <div id="result" class="result" style="display:none;"></div>
+
+  <button id="importBtn" class="primary" disabled>
+    Import to Hunter
+  </button>
+
+  <div class="settings">
+    <label>Hunter API URL:</label>
+    <input id="apiUrl" type="text" value="http://localhost:3000" />
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

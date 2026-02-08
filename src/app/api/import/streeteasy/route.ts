@@ -11,6 +11,17 @@ import { dedupeAndUpsertCanonical } from "@/worker/pipeline/dedupe";
 const MAX_HTML_SIZE = 5 * 1024 * 1024; // 5MB
 const PARSE_VERSION = "1.0.0";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+/** Handle CORS preflight for Chrome extension */
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 /**
  * POST /api/import/streeteasy
  *
@@ -157,20 +168,23 @@ export async function POST(request: NextRequest) {
     // 5. Run dedupe for this listing
     await dedupeAndUpsertCanonical(normalized.id);
 
-    return NextResponse.json({
-      success: true,
-      normalizedListingId: normalized.id,
-      parsed: {
-        title: parsed.title,
-        address: parsed.address,
-        neighborhood: parsed.neighborhood,
-        borough: parsed.borough,
-        rentGross: parsed.rentGross,
-        bedrooms: parsed.bedrooms,
-        bathrooms: parsed.bathrooms,
-        brokerFee: parsed.brokerFee,
+    return NextResponse.json(
+      {
+        success: true,
+        normalizedListingId: normalized.id,
+        parsed: {
+          title: parsed.title,
+          address: parsed.address,
+          neighborhood: parsed.neighborhood,
+          borough: parsed.borough,
+          rentGross: parsed.rentGross,
+          bedrooms: parsed.bedrooms,
+          bathrooms: parsed.bathrooms,
+          brokerFee: parsed.brokerFee,
+        },
       },
-    });
+      { headers: CORS_HEADERS }
+    );
   } catch (err) {
     console.error("[import/streeteasy] Error:", err);
     return NextResponse.json(
@@ -178,7 +192,7 @@ export async function POST(request: NextRequest) {
         error: "Failed to import listing",
         details: err instanceof Error ? err.message : String(err),
       },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }
