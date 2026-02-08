@@ -17,6 +17,7 @@ interface SearchResult {
   activeState: string;
   lastSeenAt: string;
   sourcesCount: number;
+  imageUrl: string | null;
 }
 
 interface SearchResponse {
@@ -170,60 +171,77 @@ export default function Home() {
                 <Link
                   key={unit.id}
                   href={`/units/${unit.id}`}
-                  className="block bg-white rounded-lg shadow hover:shadow-md transition-shadow p-5"
+                  className="block bg-white rounded-lg shadow hover:shadow-md transition-shadow overflow-hidden"
                 >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        {unit.address || "Address unknown"}
-                        {unit.unit ? `, #${unit.unit}` : ""}
-                      </h2>
-                      <p className="text-sm text-gray-500">
-                        {[unit.neighborhood, unit.borough]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
-                      <div className="flex gap-4 mt-2 text-sm text-gray-600">
-                        {unit.bedrooms != null && (
-                          <span>
-                            {unit.bedrooms === 0
-                              ? "Studio"
-                              : `${unit.bedrooms} bed`}
-                          </span>
-                        )}
-                        {unit.bathrooms != null && (
-                          <span>{unit.bathrooms} bath</span>
-                        )}
-                        {unit.brokerFee === false && (
-                          <span className="text-green-600 font-medium">
-                            No Fee
-                          </span>
-                        )}
-                        {unit.brokerFee === true && (
-                          <span className="text-orange-500">Broker Fee</span>
-                        )}
+                  <div className="flex">
+                    {/* Thumbnail */}
+                    {unit.imageUrl ? (
+                      <div className="w-40 h-32 flex-shrink-0">
+                        <img
+                          src={unit.imageUrl}
+                          alt={unit.address || "Listing"}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
-                    </div>
-                    <div className="text-right">
-                      {unit.rentGross != null && (
-                        <p className="text-xl font-bold text-gray-900">
-                          ${unit.rentGross.toLocaleString()}
+                    ) : (
+                      <div className="w-40 h-32 flex-shrink-0 bg-gray-100 flex items-center justify-center">
+                        <span className="text-gray-300 text-3xl">&#x1f3e0;</span>
+                      </div>
+                    )}
+                    {/* Details */}
+                    <div className="flex-1 p-4 flex justify-between items-start">
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          {unit.address || "Address unknown"}
+                          {unit.unit ? `, #${unit.unit}` : ""}
+                        </h2>
+                        <p className="text-sm text-gray-500">
+                          {[unit.neighborhood, unit.borough]
+                            .filter(Boolean)
+                            .join(", ")}
                         </p>
-                      )}
-                      <span
-                        className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium ${
-                          unit.activeState === "active"
-                            ? "bg-green-100 text-green-700"
-                            : unit.activeState === "stale"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-yellow-100 text-yellow-700"
-                        }`}
-                      >
-                        {unit.activeState}
-                      </span>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {unit.sourcesCount} source{unit.sourcesCount !== 1 ? "s" : ""}
-                      </p>
+                        <div className="flex gap-4 mt-2 text-sm text-gray-600">
+                          {unit.bedrooms != null && (
+                            <span>
+                              {unit.bedrooms === 0
+                                ? "Studio"
+                                : `${unit.bedrooms} bed`}
+                            </span>
+                          )}
+                          {unit.bathrooms != null && (
+                            <span>{unit.bathrooms} bath</span>
+                          )}
+                          {unit.brokerFee === false && (
+                            <span className="text-green-600 font-medium">
+                              No Fee
+                            </span>
+                          )}
+                          {unit.brokerFee === true && (
+                            <span className="text-orange-500">Broker Fee</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right ml-4">
+                        {unit.rentGross != null && (
+                          <p className="text-xl font-bold text-gray-900">
+                            ${unit.rentGross.toLocaleString()}
+                          </p>
+                        )}
+                        <span
+                          className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium ${
+                            unit.activeState === "active"
+                              ? "bg-green-100 text-green-700"
+                              : unit.activeState === "stale"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-yellow-100 text-yellow-700"
+                          }`}
+                        >
+                          {unit.activeState}
+                        </span>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {unit.sourcesCount} source{unit.sourcesCount !== 1 ? "s" : ""}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </Link>

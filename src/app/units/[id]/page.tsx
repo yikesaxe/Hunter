@@ -103,6 +103,45 @@ export default function UnitDetailPage({
           &larr; Back to search
         </Link>
 
+        {/* Image Gallery */}
+        {(() => {
+          const allImages = postings.flatMap((p) => p.images || []);
+          const uniqueImages = [...new Set(allImages)].slice(0, 10);
+          if (uniqueImages.length === 0) return null;
+          return (
+            <div className="bg-white rounded-lg shadow overflow-hidden mb-6">
+              {uniqueImages.length === 1 ? (
+                <img
+                  src={uniqueImages[0]}
+                  alt={unit.address || "Listing"}
+                  className="w-full h-72 object-cover"
+                />
+              ) : (
+                <div className="grid grid-cols-3 gap-0.5 max-h-72 overflow-hidden">
+                  <img
+                    src={uniqueImages[0]}
+                    alt={unit.address || "Listing"}
+                    className="col-span-2 row-span-2 w-full h-72 object-cover"
+                  />
+                  {uniqueImages.slice(1, 3).map((img, i) => (
+                    <img
+                      key={i}
+                      src={img}
+                      alt={`Photo ${i + 2}`}
+                      className="w-full h-36 object-cover"
+                    />
+                  ))}
+                </div>
+              )}
+              {uniqueImages.length > 3 && (
+                <p className="text-xs text-gray-400 px-4 py-2">
+                  +{uniqueImages.length - 3} more photos
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Unit Header */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <div className="flex justify-between items-start">

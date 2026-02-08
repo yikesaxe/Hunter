@@ -61,26 +61,40 @@ export async function GET(request: NextRequest) {
         _count: {
           select: { unitPostings: true },
         },
+        unitPostings: {
+          take: 1,
+          orderBy: { normalizedListing: { lastSeenAt: "desc" } },
+          include: {
+            normalizedListing: {
+              select: { images: true },
+            },
+          },
+        },
       },
     }),
     prisma.canonicalUnit.count({ where }),
   ]);
 
-  const results = units.map((unit) => ({
-    id: unit.id,
-    address: unit.canonicalAddress,
-    unit: unit.canonicalUnit,
-    neighborhood: unit.neighborhood,
-    borough: unit.borough,
-    bedrooms: unit.bedrooms,
-    bathrooms: unit.bathrooms,
-    rentGross: unit.bestRentGross,
-    rentNetEffective: unit.bestRentNetEffective,
-    brokerFee: unit.brokerFee,
-    activeState: unit.activeState,
-    lastSeenAt: unit.lastSeenAt,
-    sourcesCount: unit._count.unitPostings,
-  }));
+  const results = units.map((unit) => {
+    // Get the first image from the most recent posting
+    const images = (unit.unitPostings[0]?.normalizedListing?.images as string[]) || [];
+    return {
+      id: unit.id,
+      address: unit.canonicalAddress,
+      unit: unit.canonicalUnit,
+      neighborhood: unit.neighborhood,
+      borough: unit.borough,
+      bedrooms: unit.bedrooms,
+      bathrooms: unit.bathrooms,
+      rentGross: unit.bestRentGross,
+      rentNetEffective: unit.bestRentNetEffective,
+      brokerFee: unit.brokerFee,
+      activeState: unit.activeState,
+      lastSeenAt: unit.lastSeenAt,
+      sourcesCount: unit._count.unitPostings,
+      imageUrl: images[0] || null,
+    };
+  });
 
   return NextResponse.json({
     results,
