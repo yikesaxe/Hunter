@@ -6,6 +6,10 @@ import { prisma } from "@/lib/prisma";
 
 const FIRECRAWL_MAP_URL = "https://api.firecrawl.dev/v1/map";
 
+/** Track last map call time for rate limiting */
+let lastMapCallTime = 0;
+const MAP_COOLDOWN_MS = 2000; // 2 seconds between map calls
+
 /** URL patterns for known listing sources */
 const SOURCE_PATTERNS: Record<string, RegExp> = {
   leasebreak: /\/short-term-rental-details\/\d+\//,
@@ -37,6 +41,16 @@ export async function mapViaFirecrawl(opts: MapOptions): Promise<MapResult> {
   if (!apiKey) {
     throw new Error("FIRECRAWL_API_KEY not set.");
   }
+
+  // Rate limit between map calls
+  const now = Date.now();
+  const elapsed = now - lastMapCallTime;
+  if (elapsed < MAP_COOLDOWN_MS) {
+    const wait = MAP_COOLDOWN_MS - elapsed;
+    console.log(`[firecrawl-map] Rate limiting: waiting ${wait}ms`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  lastMapCallTime = Date.now();
 
   console.log(`[firecrawl-map] Mapping ${opts.url} (search: "${opts.search}")`);
 

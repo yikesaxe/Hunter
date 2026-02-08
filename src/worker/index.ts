@@ -4,6 +4,8 @@ import * as path from "path";
 import { ingestAll, ingestAdapter, ingestOne } from "./pipeline/ingest";
 import { dedupeAll, dedupeAndUpsertCanonical } from "./pipeline/dedupe";
 import { updateFreshness } from "./pipeline/freshness";
+import { runRegistryCrawler } from "./pipeline/registryCrawler";
+import { runUserTargetedCrawler } from "./pipeline/userTargetedCrawler";
 import { mockStreetEasyAdapter } from "./adapters/mockStreetEasy";
 import { mockCraigslistAdapter } from "./adapters/mockCraigslist";
 import { leasebreakAdapter } from "./adapters/leasebreak";
@@ -15,15 +17,29 @@ import { prisma } from "@/lib/prisma";
 // TODO: Dedalus ADK tool wrapper — expose ingest/search as callable tools
 
 /** Parse CLI args */
-function parseArgs(): { source?: string; limit?: number } {
+function parseArgs(): {
+  source?: string;
+  limit?: number;
+  mode?: string;
+  target?: number;
+} {
   const args = process.argv.slice(2);
-  const result: { source?: string; limit?: number } = {};
+  const result: {
+    source?: string;
+    limit?: number;
+    mode?: string;
+    target?: number;
+  } = {};
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--source" && args[i + 1]) {
       result.source = args[++i];
     } else if (args[i] === "--limit" && args[i + 1]) {
       result.limit = parseInt(args[++i], 10);
+    } else if (args[i] === "--mode" && args[i + 1]) {
+      result.mode = args[++i];
+    } else if (args[i] === "--target" && args[i + 1]) {
+      result.target = parseInt(args[++i], 10);
     }
   }
   return result;
@@ -36,8 +52,6 @@ const MOCK_ADAPTERS: SourceAdapter[] = [
 
 /**
  * Import StreetEasy listings from HTML files in /imports/streeteasy/*.html.
- * Each file should be named with a URL-safe identifier and contain page source HTML.
- * A .url sidecar file can optionally contain the original listing URL.
  */
 async function importStreetEasyFromFolder(): Promise<void> {
   const importsDir = path.resolve(process.cwd(), "imports/streeteasy");
@@ -68,7 +82,6 @@ async function importStreetEasyFromFolder(): Promise<void> {
     const filePath = path.join(importsDir, file);
     const html = fs.readFileSync(filePath, "utf-8");
 
-    // Check for a .url sidecar file with the original URL
     const urlFile = filePath.replace(/\.html$/, ".url");
     let url = `file://${filePath}`;
     if (fs.existsSync(urlFile)) {
@@ -81,7 +94,6 @@ async function importStreetEasyFromFolder(): Promise<void> {
       const now = new Date();
       const parsed = parseStreetEasyHtml(html, { url });
 
-      // Store RawListing
       const rawListing = await prisma.rawListing.upsert({
         where: {
           source_sourceUrl: { source: "streeteasy", sourceUrl: url },
@@ -107,7 +119,6 @@ async function importStreetEasyFromFolder(): Promise<void> {
         data: { extractedJson: JSON.parse(JSON.stringify(parsed)) },
       });
 
-      // Upsert NormalizedListing
       const normalized = await prisma.normalizedListing.upsert({
         where: {
           source_sourceUrl: { source: "streeteasy", sourceUrl: url },
@@ -153,7 +164,6 @@ async function importStreetEasyFromFolder(): Promise<void> {
         `[worker] Imported "${parsed.title}" (${parsed.rentGross ? "$" + parsed.rentGross : "no rent"}, ${parsed.bedrooms ?? "?"} bed)`
       );
 
-      // Dedupe immediately
       await dedupeAndUpsertCanonical(normalized.id);
     } catch (err) {
       console.error(`[worker] Error importing ${file}:`, err);
@@ -162,9 +172,36 @@ async function importStreetEasyFromFolder(): Promise<void> {
 }
 
 async function main() {
-  const { source, limit } = parseArgs();
+  const { source, limit, mode, target } = parseArgs();
 
   console.log("=== Hunter Worker Starting ===");
+
+  // ==================== MODE-BASED ROUTING ====================
+
+  if (mode === "registry") {
+    console.log(
+      `\nMode: registry crawler (target: ${target ?? 200} canonical units)`
+    );
+    const sources = source
+      ? source.split(",")
+      : ["leasebreak", "streeteasy"];
+    await runRegistryCrawler({
+      sources,
+      targetCanonicalCount: target ?? 200,
+      maxUrlsPerRun: limit ?? 200,
+    });
+    console.log("\n=== Hunter Worker Complete ===");
+    process.exit(0);
+  }
+
+  if (mode === "user-targeted") {
+    console.log("\nMode: user-targeted crawler");
+    await runUserTargetedCrawler();
+    console.log("\n=== Hunter Worker Complete ===");
+    process.exit(0);
+  }
+
+  // ==================== SOURCE-BASED ROUTING (legacy) ====================
 
   let adapters: SourceAdapter[];
 
@@ -172,9 +209,6 @@ async function main() {
     if (!process.env.FIRECRAWL_API_KEY) {
       console.error(
         "\n[worker] StreetEasy requires FIRECRAWL_API_KEY in .env"
-      );
-      console.error(
-        "[worker] Or use --source streeteasyImport to import from /imports/streeteasy/*.html"
       );
       process.exit(1);
     }
@@ -185,7 +219,6 @@ async function main() {
     adapters = MOCK_ADAPTERS;
   } else if (source === "streeteasyImport") {
     await importStreetEasyFromFolder();
-    // Still run dedupe + freshness after import
     console.log("\n--- Phase 2: Deduplication ---");
     await dedupeAll();
     console.log("\n--- Phase 3: Freshness ---");
@@ -193,7 +226,6 @@ async function main() {
     console.log("\n=== Hunter Worker Complete ===");
     process.exit(0);
   } else if (!source) {
-    // Default: run all automated sources
     adapters = [...MOCK_ADAPTERS, leasebreakAdapter];
     if (process.env.FIRECRAWL_API_KEY) {
       adapters.push(streeteasyAdapter);
@@ -203,6 +235,9 @@ async function main() {
     console.error(
       "[worker] Available sources: streeteasy, leasebreak, mock, streeteasyImport"
     );
+    console.error(
+      "[worker] Available modes: registry, user-targeted"
+    );
     process.exit(1);
   }
 
@@ -210,15 +245,12 @@ async function main() {
     `Adapters: ${adapters.map((a) => a.name).join(", ")}${limit ? ` (limit: ${limit})` : ""}`
   );
 
-  // Phase 1: Ingestion
   console.log("\n--- Phase 1: Ingestion ---");
   await ingestAll(adapters, { limit });
 
-  // Phase 2: Deduplicate and canonicalize
   console.log("\n--- Phase 2: Deduplication ---");
   await dedupeAll();
 
-  // Phase 3: Update freshness state
   console.log("\n--- Phase 3: Freshness ---");
   await updateFreshness();
 

@@ -5,6 +5,7 @@ import {
 } from "./SourceAdapter";
 import { NormalizedListingInput } from "@/lib/domain/types";
 import { fetchWithPolicy } from "../http/fetchWithPolicy";
+import { mapViaFirecrawl } from "../http/firecrawlMap";
 import { loadHtml } from "../html/cheerio";
 import {
   parseText,
@@ -65,56 +66,98 @@ function parseLeaseTermMonths(text: string | null): number | null {
   return match ? parseInt(match[1], 10) : null;
 }
 
+/**
+ * Discover listings by fetching seed search pages directly (no Firecrawl needed).
+ */
+async function discoverViaSeedPages(): Promise<DiscoveredListing[]> {
+  const seen = new Set<string>();
+  const results: DiscoveredListing[] = [];
+
+  for (const seedUrl of SEED_URLS) {
+    try {
+      console.log(`[leasebreak] Discovering from ${seedUrl}`);
+      const res = await fetchWithPolicy(seedUrl);
+
+      if (res.httpStatus !== 200) {
+        console.warn(
+          `[leasebreak] Seed page ${seedUrl} returned ${res.httpStatus}`
+        );
+        continue;
+      }
+
+      const matches = res.content.matchAll(
+        /href="(\/short-term-rental-details\/(\d+)\/[^"]+)"/g
+      );
+
+      for (const match of matches) {
+        const path = match[1];
+        const listingId = match[2];
+        const fullUrl = `${BASE_URL}${path}`;
+
+        if (!seen.has(fullUrl)) {
+          seen.add(fullUrl);
+          results.push({
+            url: fullUrl,
+            sourceListingId: listingId,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[leasebreak] Error discovering from ${seedUrl}:`, err);
+    }
+  }
+
+  console.log(
+    `[leasebreak] Discovered ${results.length} unique detail URLs from ${SEED_URLS.length} seed pages`
+  );
+  return results;
+}
+
+/**
+ * Discover listings via Firecrawl /map endpoint — finds URLs across the site.
+ */
+async function discoverViaFirecrawl(): Promise<DiscoveredListing[]> {
+  console.log("[leasebreak] Discovering via Firecrawl map...");
+
+  const mapResult = await mapViaFirecrawl({
+    url: BASE_URL,
+    search: "NYC sublet apartment short term rental for rent",
+    source: "leasebreak",
+    limit: 500,
+  });
+
+  const results: DiscoveredListing[] = [];
+  for (const link of mapResult.listingLinks) {
+    const match = link.match(/\/short-term-rental-details\/(\d+)\//);
+    results.push({
+      url: link,
+      sourceListingId: match ? match[1] : undefined,
+    });
+  }
+
+  console.log(
+    `[leasebreak] Firecrawl discovered ${results.length} listing URLs`
+  );
+  return results;
+}
+
 export const leasebreakAdapter: SourceAdapter = {
   name: "leasebreak",
 
   /**
-   * Discover listing detail URLs by fetching seed search pages and extracting
-   * links matching /short-term-rental-details/<id>/<slug>.
+   * Discover listing detail URLs.
+   * Two modes:
+   *   - Default: fetch seed search pages directly and extract links
+   *   - Firecrawl: use Firecrawl /map endpoint (--firecrawl-discover flag)
    */
   async discover(): Promise<DiscoveredListing[]> {
-    const seen = new Set<string>();
-    const results: DiscoveredListing[] = [];
+    const useFirecrawl = process.argv.includes("--firecrawl-discover");
 
-    for (const seedUrl of SEED_URLS) {
-      try {
-        console.log(`[leasebreak] Discovering from ${seedUrl}`);
-        const res = await fetchWithPolicy(seedUrl);
-
-        if (res.httpStatus !== 200) {
-          console.warn(
-            `[leasebreak] Seed page ${seedUrl} returned ${res.httpStatus}`
-          );
-          continue;
-        }
-
-        // Extract all detail links from the page
-        const matches = res.content.matchAll(
-          /href="(\/short-term-rental-details\/(\d+)\/[^"]+)"/g
-        );
-
-        for (const match of matches) {
-          const path = match[1];
-          const listingId = match[2];
-          const fullUrl = `${BASE_URL}${path}`;
-
-          if (!seen.has(fullUrl)) {
-            seen.add(fullUrl);
-            results.push({
-              url: fullUrl,
-              sourceListingId: listingId,
-            });
-          }
-        }
-      } catch (err) {
-        console.error(`[leasebreak] Error discovering from ${seedUrl}:`, err);
-      }
+    if (useFirecrawl && process.env.FIRECRAWL_API_KEY) {
+      return discoverViaFirecrawl();
     }
 
-    console.log(
-      `[leasebreak] Discovered ${results.length} unique detail URLs from ${SEED_URLS.length} seed pages`
-    );
-    return results;
+    return discoverViaSeedPages();
   },
 
   /**

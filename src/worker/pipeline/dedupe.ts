@@ -42,15 +42,20 @@ export async function dedupeAll(): Promise<void> {
  * 4. If best score >= 60: attach to existing, else create new
  * 5. Detect price/fee changes and log them
  */
+export interface DedupeResult {
+  canonicalUnitId: string;
+  createdNew: boolean;
+}
+
 export async function dedupeAndUpsertCanonical(
   normalizedListingId: string
-): Promise<void> {
+): Promise<DedupeResult | null> {
   const listing = await prisma.normalizedListing.findUnique({
     where: { id: normalizedListingId },
   });
   if (!listing) {
     console.warn(`[dedupe] Listing ${normalizedListingId} not found`);
-    return;
+    return null;
   }
 
   const normAddr = listing.address
@@ -101,6 +106,8 @@ export async function dedupeAndUpsertCanonical(
         lastSeenAt: listing.lastSeenAt,
       },
     });
+
+    return { canonicalUnitId: bestCandidate.id, createdNew: false };
   } else {
     // Create new canonical unit
     console.log(
@@ -132,6 +139,8 @@ export async function dedupeAndUpsertCanonical(
         matchScore: 100, // exact match — it created the canonical unit
       },
     });
+
+    return { canonicalUnitId: canonical.id, createdNew: true };
   }
 }
 
