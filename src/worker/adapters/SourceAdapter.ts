@@ -29,4 +29,5 @@ export interface DiscoveredListing {
 export interface FetchResult {
   httpStatus: number;
   content: string;
+  finalUrl?: string;
 }
