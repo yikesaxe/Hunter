@@ -1,0 +1,26 @@
+{
+  "id": "se-002",
+  "title": "Renovated 2BR with Rooftop Access in Williamsburg",
+  "address": "156 North 4th Street",
+  "unit": "5B",
+  "neighborhood": "Williamsburg",
+  "borough": "Brooklyn",
+  "lat": 40.7163,
+  "lng": -73.9615,
+  "rent": 4500,
+  "netEffectiveRent": 4250,
+  "bedrooms": 2,
+  "bathrooms": 1,
+  "brokerFee": true,
+  "leaseTermMonths": 12,
+  "description": "Stunning renovated 2 bedroom with stainless steel appliances, in-unit washer/dryer, and access to a shared rooftop with Manhattan skyline views.",
+  "petPolicy": "pets_allowed",
+  "laundry": "in_unit",
+  "elevator": true,
+  "doorman": false,
+  "images": [
+    "https://images.example.com/se-002-1.jpg",
+    "https://images.example.com/se-002-2.jpg",
+    "https://images.example.com/se-002-3.jpg"
+  ]
+}

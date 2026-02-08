@@ -1,0 +1,21 @@
+{
+  "post_id": "cl-003",
+  "post_title": "Bright Studio - Astoria - Near N/W Trains",
+  "location": "31-15 Broadway",
+  "area": "Astoria",
+  "boro": "queens",
+  "latitude": 40.7627,
+  "longitude": -73.9237,
+  "price": 1900,
+  "br": 0,
+  "ba": 1,
+  "fee": "no fee",
+  "body": "Cozy studio in the heart of Astoria. Walk to the N/W trains, tons of restaurants nearby. Heat and hot water included.",
+  "pets": "no pets",
+  "laundry_situation": "laundry in bldg",
+  "has_elevator": false,
+  "has_doorman": false,
+  "pic_urls": [
+    "https://images.example.com/cl-003-1.jpg"
+  ]
+}

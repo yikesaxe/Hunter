@@ -1,0 +1,25 @@
+{
+  "id": "se-001",
+  "title": "Sunny 1BR in East Village with Exposed Brick",
+  "address": "245 East 7th Street",
+  "unit": "3A",
+  "neighborhood": "East Village",
+  "borough": "Manhattan",
+  "lat": 40.7265,
+  "lng": -73.9838,
+  "rent": 3200,
+  "netEffectiveRent": 3100,
+  "bedrooms": 1,
+  "bathrooms": 1,
+  "brokerFee": false,
+  "leaseTermMonths": 12,
+  "description": "Beautiful 1 bedroom apartment with exposed brick walls, hardwood floors, and great natural light. Steps from Tompkins Square Park.",
+  "petPolicy": "cats_only",
+  "laundry": "in_building",
+  "elevator": false,
+  "doorman": false,
+  "images": [
+    "https://images.example.com/se-001-1.jpg",
+    "https://images.example.com/se-001-2.jpg"
+  ]
+}

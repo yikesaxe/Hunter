@@ -1,0 +1,22 @@
+{
+  "post_id": "cl-005",
+  "post_title": "1BR Harlem Renaissance - Recently Renovated",
+  "location": "280 W 135th Street",
+  "area": "Harlem",
+  "boro": "manhattan",
+  "latitude": 40.8181,
+  "longitude": -73.9479,
+  "price": 2200,
+  "br": 1,
+  "ba": 1,
+  "fee": "no fee",
+  "body": "Recently renovated 1BR in historic Harlem. New kitchen and bath, hardwood floors throughout. Near A/B/C/D trains at 135th.",
+  "pets": "cats ok",
+  "laundry_situation": "laundry in bldg",
+  "has_elevator": true,
+  "has_doorman": false,
+  "pic_urls": [
+    "https://images.example.com/cl-005-1.jpg",
+    "https://images.example.com/cl-005-2.jpg"
+  ]
+}

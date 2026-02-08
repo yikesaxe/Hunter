@@ -1,0 +1,21 @@
+{
+  "post_id": "cl-001",
+  "post_title": "★ Huge 1BR East Village - No Fee! ★",
+  "location": "245 E 7th St Apt 3A",
+  "area": "East Village",
+  "boro": "manhattan",
+  "latitude": 40.7264,
+  "longitude": -73.9839,
+  "price": 3250,
+  "br": 1,
+  "ba": 1,
+  "fee": "no fee",
+  "body": "Massive 1 bedroom on East 7th. Exposed brick, natural light, close to everything. No broker fee! Available immediately.",
+  "pets": "cats ok",
+  "laundry_situation": "laundry in bldg",
+  "has_elevator": false,
+  "has_doorman": false,
+  "pic_urls": [
+    "https://images.example.com/cl-001-1.jpg"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "post_id": "cl-004",
+  "post_title": "HUGE 3BR Park Slope Duplex w/ Garden",
+  "location": "487 Fifth Ave, Apt 1",
+  "area": "Park Slope",
+  "boro": "brooklyn",
+  "latitude": 40.6712,
+  "longitude": -73.9825,
+  "price": 5900,
+  "br": 3,
+  "ba": 2,
+  "fee": "broker fee",
+  "body": "Amazing duplex with private garden in Park Slope. Three bedrooms, two full baths. Near Prospect Park. Broker fee 15%.",
+  "pets": "dogs and cats ok",
+  "laundry_situation": "w/d in unit",
+  "has_elevator": false,
+  "has_doorman": false,
+  "pic_urls": [
+    "https://images.example.com/cl-004-1.jpg",
+    "https://images.example.com/cl-004-2.jpg",
+    "https://images.example.com/cl-004-3.jpg"
+  ]
+}

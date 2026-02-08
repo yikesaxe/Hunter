@@ -1,0 +1,24 @@
+{
+  "id": "se-003",
+  "title": "Spacious Studio with Doorman in UWS",
+  "address": "320 West 89th Street",
+  "unit": "12F",
+  "neighborhood": "Upper West Side",
+  "borough": "Manhattan",
+  "lat": 40.7891,
+  "lng": -73.9741,
+  "rent": 2600,
+  "netEffectiveRent": 2600,
+  "bedrooms": 0,
+  "bathrooms": 1,
+  "brokerFee": false,
+  "leaseTermMonths": 12,
+  "description": "Large studio in a full-service doorman building. Close to Central Park, Riverside Park, and express subway lines.",
+  "petPolicy": "no_pets",
+  "laundry": "in_building",
+  "elevator": true,
+  "doorman": true,
+  "images": [
+    "https://images.example.com/se-003-1.jpg"
+  ]
+}

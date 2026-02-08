@@ -1,0 +1,22 @@
+{
+  "post_id": "cl-002",
+  "post_title": "2BR Williamsburg - Rooftop - W/D In Unit",
+  "location": "156 N 4th St, Unit 5B",
+  "area": "Williamsburg",
+  "boro": "brooklyn",
+  "latitude": 40.7164,
+  "longitude": -73.9614,
+  "price": 4600,
+  "br": 2,
+  "ba": 1,
+  "fee": "broker fee",
+  "body": "Renovated 2br in prime Williamsburg. Washer dryer in unit, shared roof deck, close to L train. Broker fee applies.",
+  "pets": "dogs and cats ok",
+  "laundry_situation": "w/d in unit",
+  "has_elevator": true,
+  "has_doorman": false,
+  "pic_urls": [
+    "https://images.example.com/cl-002-1.jpg",
+    "https://images.example.com/cl-002-2.jpg"
+  ]
+}

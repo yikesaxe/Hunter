@@ -1,0 +1,27 @@
+{
+  "id": "se-004",
+  "title": "3BR Duplex with Private Garden in Park Slope",
+  "address": "487 5th Avenue",
+  "unit": "1",
+  "neighborhood": "Park Slope",
+  "borough": "Brooklyn",
+  "lat": 40.6711,
+  "lng": -73.9826,
+  "rent": 5800,
+  "netEffectiveRent": 5500,
+  "bedrooms": 3,
+  "bathrooms": 2,
+  "brokerFee": true,
+  "leaseTermMonths": 24,
+  "description": "Gorgeous duplex with a private garden, chef's kitchen, and three spacious bedrooms. Located on a tree-lined block near Prospect Park.",
+  "petPolicy": "pets_allowed",
+  "laundry": "in_unit",
+  "elevator": false,
+  "doorman": false,
+  "images": [
+    "https://images.example.com/se-004-1.jpg",
+    "https://images.example.com/se-004-2.jpg",
+    "https://images.example.com/se-004-3.jpg",
+    "https://images.example.com/se-004-4.jpg"
+  ]
+}

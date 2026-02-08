@@ -1,0 +1,25 @@
+{
+  "id": "se-005",
+  "title": "Modern 1BR in Long Island City with City Views",
+  "address": "27-01 Queens Plaza North",
+  "unit": "18C",
+  "neighborhood": "Long Island City",
+  "borough": "Queens",
+  "lat": 40.7505,
+  "lng": -73.9393,
+  "rent": 3400,
+  "netEffectiveRent": 3200,
+  "bedrooms": 1,
+  "bathrooms": 1,
+  "brokerFee": false,
+  "leaseTermMonths": 13,
+  "description": "Brand new luxury 1 bedroom with floor-to-ceiling windows, Manhattan skyline views, gym, and rooftop pool. One stop from Midtown.",
+  "petPolicy": "pets_allowed",
+  "laundry": "in_unit",
+  "elevator": true,
+  "doorman": true,
+  "images": [
+    "https://images.example.com/se-005-1.jpg",
+    "https://images.example.com/se-005-2.jpg"
+  ]
+}
