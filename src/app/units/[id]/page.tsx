@@ -241,11 +241,24 @@ export default function UnitDetailPage({
                   )}
                 </div>
               </div>
-              <p className="text-xs text-gray-400 mt-2">
-                First seen: {new Date(posting.firstSeenAt).toLocaleDateString()}{" "}
-                &middot; Last seen:{" "}
-                {new Date(posting.lastSeenAt).toLocaleDateString()}
-              </p>
+              <div className="flex justify-between items-center mt-2">
+                <p className="text-xs text-gray-400">
+                  First seen: {new Date(posting.firstSeenAt).toLocaleDateString()}{" "}
+                  &middot; Last seen:{" "}
+                  {new Date(posting.lastSeenAt).toLocaleDateString()}
+                </p>
+                {posting.sourceUrl && !posting.sourceUrl.startsWith("file://") && (
+                  <a
+                    href={posting.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline font-medium"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    View original listing &rarr;
+                  </a>
+                )}
+              </div>
             </div>
           ))}
         </div>
