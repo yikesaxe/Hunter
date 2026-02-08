@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model RawListing {
+  id              String   @id @default(uuid())
+  source          String
+  sourceUrl       String
+  sourceListingId String?
+  fetchedAt       DateTime
+  httpStatus      Int?
+  rawContent      String?
+  extractedJson   Json?
+  parseVersion    String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  normalizedListings NormalizedListing[]
+
+  @@unique([source, sourceUrl])
+}
+
+model NormalizedListing {
+  id              String   @id @default(uuid())
+  rawListingId    String
+  rawListing      RawListing @relation(fields: [rawListingId], references: [id])
+  source          String
+  sourceUrl       String
+  title           String
+  description     String?
+  address         String?
+  unit            String?
+  neighborhood    String?
+  borough         String?
+  lat             Float?
+  lng             Float?
+  rentGross       Int?
+  rentNetEffective Int?
+  bedrooms        Float?
+  bathrooms       Float?
+  brokerFee       Boolean?
+  leaseTermMonths Int?
+  moveInCostNotes String?
+  petPolicy       String?
+  laundry         String?
+  elevator        Boolean?
+  doorman         Boolean?
+  images          Json     @default("[]")
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime
+
+  unitPostings    UnitPosting[]
+  changeLogs      ChangeLog[]
+
+  @@unique([source, sourceUrl])
+  @@index([borough, neighborhood, rentGross])
+  @@index([lastSeenAt])
+}
+
+model CanonicalUnit {
+  id                  String   @id @default(uuid())
+  canonicalAddress    String?
+  canonicalUnit       String?
+  neighborhood        String?
+  borough             String?
+  lat                 Float?
+  lng                 Float?
+  bedrooms            Float?
+  bathrooms           Float?
+  bestRentGross       Int?
+  bestRentNetEffective Int?
+  brokerFee           Boolean?
+  activeState         String   @default("unknown")
+  lastSeenAt          DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  unitPostings        UnitPosting[]
+  changeLogs          ChangeLog[]
+
+  @@index([borough, neighborhood, bestRentGross])
+  @@index([lastSeenAt])
+}
+
+model UnitPosting {
+  id                  String   @id @default(uuid())
+  canonicalUnitId     String
+  canonicalUnit       CanonicalUnit @relation(fields: [canonicalUnitId], references: [id])
+  normalizedListingId String
+  normalizedListing   NormalizedListing @relation(fields: [normalizedListingId], references: [id])
+  matchScore          Float
+  createdAt           DateTime @default(now())
+
+  @@unique([canonicalUnitId, normalizedListingId])
+}
+
+model ChangeLog {
+  id                  String   @id @default(uuid())
+  canonicalUnitId     String
+  canonicalUnit       CanonicalUnit @relation(fields: [canonicalUnitId], references: [id])
+  normalizedListingId String?
+  normalizedListing   NormalizedListing? @relation(fields: [normalizedListingId], references: [id])
+  kind                String
+  payload             Json
+  createdAt           DateTime @default(now())
+}
