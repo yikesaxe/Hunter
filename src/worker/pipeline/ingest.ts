@@ -80,7 +80,7 @@ export async function ingestOne(
   // 4. Store extractedJson on raw listing
   await prisma.rawListing.update({
     where: { id: rawListing.id },
-    data: { extractedJson: parsed as unknown as Record<string, unknown> },
+    data: { extractedJson: JSON.parse(JSON.stringify(parsed)) },
   });
 
   // 5. Upsert NormalizedListing
