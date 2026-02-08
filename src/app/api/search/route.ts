@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 // TODO: Flowglad subscription guard — check pro features access here
+// TODO: Flowglad — gate advanced filters (neighborhood, net effective rent) behind pro tier
 
 /**
  * GET /api/search

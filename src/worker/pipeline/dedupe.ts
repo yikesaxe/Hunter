@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeAddress, geoBucket } from "@/lib/domain/normalize";
 
+// TODO: Dedalus ADK — wrap dedupeAll() as a callable tool for the agent
+
 /**
  * Run deduplication across all normalized listings that don't yet have
  * a canonical unit posting attached.

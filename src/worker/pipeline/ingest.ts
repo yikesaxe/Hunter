@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { SourceAdapter } from "../adapters/SourceAdapter";
 
+// TODO: Dedalus ADK — wrap ingestAll() as a callable tool for the agent
+// TODO: Dedalus ADK — add progress callback for streaming status to the agent
+
 const PARSE_VERSION = "1.0.0";
 
 /**
