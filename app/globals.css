@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #F5F2ED;
+  --foreground: #18150F;
+  --muted: #79706A;
+  --muted-light: #B0A99F;
+  --border: #E3DDD5;
+  --card: #FFFFFF;
+  --accent: #C27D3A;
+  --accent-hover: #A5651E;
+  --accent-light: #F2E8D9;
+  --surface: #EEEBE4;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-up {
+  opacity: 0;
+  animation: fadeUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-fade-in {
+  opacity: 0;
+  animation: fadeIn 0.35s ease forwards;
+}
