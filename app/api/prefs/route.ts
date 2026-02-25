@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getOrCreateDevice, getDeviceIdCookieOptions } from "@/lib/device";
 import { prefsSchema, type PrefsInput } from "@/lib/validation/prefs";
+import { syncCrawlJobsForDevice } from "@/lib/crawlJobs";
 
 export async function GET() {
   try {
@@ -54,6 +55,11 @@ export async function POST(req: NextRequest) {
         notes: p.notes ?? "",
       },
     });
+    // Fire-and-forget: sync CrawlJobs so the scraper scheduler picks them up
+    syncCrawlJobsForDevice(deviceId).catch((e) =>
+      console.error("[prefs] CrawlJob sync failed:", e)
+    );
+
     const res = NextResponse.json(prefsToJson(prefs));
     if (isNew) res.cookies.set("hid", deviceId, getDeviceIdCookieOptions());
     return res;
