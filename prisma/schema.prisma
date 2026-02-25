@@ -6,58 +6,209 @@ datasource db {
   provider = "postgresql"
 }
 
-model Listing {
-  id              String   @id @default(uuid())
-  source          String
-  sourceListingId String?
-  url             String
-  canonicalUrl    String?
+// ============================================================
+// CANONICAL LAYER
+// ============================================================
 
-  title        String?
+/// Physical apartment unit, deduped across sources.
+/// activePostingsCount / bestRentGross are denormalized for query performance
+/// and updated by the scraper on every status change.
+model CanonicalUnit {
+  id           String  @id @default(uuid())
+
   address      String?
+  unit         String?
   neighborhood String?
   borough      String?
-  city         String   @default("New York")
-  state        String   @default("NY")
   zip          String?
+  latitude     Float?
+  longitude    Float?
+  beds         Float?
+  baths        Float?
+  sqft         Int?
 
-  latitude  Float?
-  longitude Float?
+  // Denormalized aggregates (updated on posting status change)
+  activePostingsCount Int      @default(0)
+  bestRentGross       Int?     // lowest rentGross across active postings
+  lastActiveAt        DateTime?
 
-  price      Int?
-  priceDelta Int?   // positive = increase, negative = drop
-  beds       Float?
-  baths      Float?
-  sqft       Int?
-
-  description String?
-  amenities   String   @default("[]")
-  photos      String   @default("[]")
-
-  brokerName  String?
-  brokerPhone String?
-  brokerEmail String?
-
-  listedAt DateTime?
-  status   String   @default("active")
-
-  firstSeenAt   DateTime  @default(now())
-  lastSeenAt    DateTime
-  lastScrapedAt DateTime
-
-  contentHash String
-  raw         String   @default("{}")
+  // Cached from last recommendation scoring pass
+  lastMatchScore      Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  events Event[]
+  postings   NormalizedListing[]
+  changeLogs ChangeLog[]
+
+  @@index([neighborhood, borough])
+  @@index([activePostingsCount])
+  @@index([lastMatchScore])
+}
+
+/// One posting = one source URL for one apartment. Primary lifecycle entity.
+/// A CanonicalUnit may have N postings across sources.
+model NormalizedListing {
+  id              String  @id @default(uuid())
+  source          String
+  sourceListingId String?  // dedup key when available
+  sourceUrl       String   // always set; fallback dedup key
+
+  // Location
+  address      String?
+  unit         String?
+  neighborhood String?
+  borough      String?
+  zip          String?
+  latitude     Float?
+  longitude    Float?
+
+  // Financials (tracked in contentHash)
+  rentGross       Int?     // listed monthly rent
+  rentNet         Int?     // effective rent after concessions
+  priceDelta      Int?     // recent change (StreetEasy pill: positive=increase)
+  brokerFee       Boolean?
+  brokerFeeMonths Float?
+
+  // Unit details (tracked in contentHash)
+  beds  Float?
+  baths Float?
+  sqft  Int?
+
+  // Lease terms (tracked in contentHash)
+  leaseTerm     String?
+  availableFrom DateTime?
+
+  // Content (tracked in contentHash; amenities sorted before hashing)
+  description String?
+  amenities   String  @default("[]") // JSON string[]
+  photos      String  @default("[]") // JSON string[]
+
+  // Broker contact
+  brokerName  String?
+  brokerPhone String?
+  brokerEmail String?
+
+  // Lifecycle
+  status    String    @default("active") // "active" | "stale" | "removed"
+  removedAt DateTime?
+
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  lastScrapedAt DateTime @default(now())
+  nextScrapeAt  DateTime?
+
+  // Change detection
+  contentHash String?
+
+  // Removal tracking
+  consecutiveMisses Int @default(0)
+  consecutiveFails  Int @default(0)
+
+  // Discovery provenance
+  discoveredByCrawlJobId String?
+  discoveredByCrawlJob   CrawlJob? @relation("DiscoveredBy", fields: [discoveredByCrawlJobId], references: [id], onDelete: SetNull)
+
+  // Canonical dedup link
+  canonicalUnitId String?
+  canonicalUnit   CanonicalUnit? @relation(fields: [canonicalUnitId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rawListings RawListing[]
+  changeLogs  ChangeLog[]
+  events      Event[]
 
   @@unique([source, sourceListingId])
-  @@index([url])
-  @@index([contentHash])
+  @@index([sourceUrl])
   @@index([source, status])
-  @@index([lastSeenAt])
+  @@index([status, nextScrapeAt])
+  @@index([consecutiveMisses])
+  @@index([canonicalUnitId])
+  @@index([discoveredByCrawlJobId])
+}
+
+/// Raw scrape output, append-only. Enables reprocessing without re-fetching.
+model RawListing {
+  id         String   @id @default(uuid())
+  source     String
+  sourceUrl  String
+  rawData    Json     // full ListingData object from parseListing()
+  statusCode Int
+  scrapedAt  DateTime @default(now())
+
+  normalizedListingId String?
+  normalizedListing   NormalizedListing? @relation(fields: [normalizedListingId], references: [id], onDelete: SetNull)
+
+  @@index([sourceUrl, scrapedAt])
+  @@index([normalizedListingId])
+}
+
+/// Append-only field-level change log for postings and canonical units.
+model ChangeLog {
+  id String @id @default(uuid())
+
+  normalizedListingId String?
+  normalizedListing   NormalizedListing? @relation(fields: [normalizedListingId], references: [id], onDelete: Cascade)
+
+  canonicalUnitId String?
+  canonicalUnit   CanonicalUnit? @relation(fields: [canonicalUnitId], references: [id], onDelete: Cascade)
+
+  changedAt DateTime @default(now())
+  // e.g. { rentGross: { from: 3000, to: 2800 }, status: { from: "active", to: "removed" } }
+  fields    Json
+  trigger   String // "scrape" | "refresh" | "normalization" | "miss-pass"
+
+  @@index([normalizedListingId, changedAt])
+  @@index([canonicalUnitId, changedAt])
+}
+
+// ============================================================
+// CRAWL INFRASTRUCTURE
+// ============================================================
+
+/// Persistent crawl job config per (device × source × search URL).
+/// Multiple jobs per (device, source) are allowed — e.g. one per neighborhood.
+model CrawlJob {
+  id            String  @id @default(uuid())
+  deviceId      String? // null = registry (broad) crawl
+  source        String
+  searchUrl     String
+  searchUrlHash String  // sha256(searchUrl).slice(0,16) — used in @@unique
+
+  status           String    @default("idle") // "idle"|"queued"|"running"|"failed"
+  lastRunAt        DateTime?
+  nextRunAt        DateTime  @default(now())
+  consecutiveFails Int       @default(0)
+  backoffUntil     DateTime?
+  cursor           String?   // pagination state (next-page URL or page number)
+
+  totalDiscovered Int @default(0)
+  totalScraped    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  device     Device?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  runs       CrawlRun[]
+  discovered NormalizedListing[] @relation("DiscoveredBy")
+
+  @@unique([deviceId, source, searchUrlHash])
+  @@index([nextRunAt, status])
+  @@index([deviceId])
+}
+
+/// URLs seen during a single crawl run (accumulated across paginated pages).
+/// Used for post-run miss detection — only computed when CrawlRun.isComplete=true.
+model CrawlRunSeen {
+  id         String   @id @default(uuid())
+  crawlRunId String
+  crawlRun   CrawlRun @relation(fields: [crawlRunId], references: [id], onDelete: Cascade)
+  sourceUrl  String
+
+  @@unique([crawlRunId, sourceUrl]) // idempotent inserts safe
+  @@index([crawlRunId])
 }
 
 model CrawlRun {
@@ -72,63 +223,76 @@ model CrawlRun {
   errors     Int       @default(0)
   stats      String    @default("{}")
 
+  crawlJobId String?
+  crawlJob   CrawlJob? @relation(fields: [crawlJobId], references: [id], onDelete: SetNull)
+  mode       String    @default("targeted") // "targeted" | "registry"
+  isComplete Boolean   @default(false)      // true = all pages done, miss pass may run
+
+  seenUrls CrawlRunSeen[]
+
   @@index([source])
   @@index([startedAt])
+  @@index([crawlJobId])
+  @@index([isComplete])
 }
 
-// Anonymous device for preferences and events (no auth)
+// ============================================================
+// USER LAYER
+// ============================================================
+
 model Device {
   id         String   @id @default(uuid())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   lastSeenAt DateTime @default(now())
 
-  prefs   Preference?
-  events  Event[]
-  profile DeviceProfile?
+  prefs     Preference?
+  events    Event[]
+  profile   DeviceProfile?
+  crawlJobs CrawlJob[]
 
   @@index([id])
 }
 
 model Preference {
-  id          String   @id @default(uuid())
-  deviceId    String   @unique
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  name        String
-  minPrice    Int
-  maxPrice    Int
-  beds        Json     // number[] e.g. [0,1,2]
-  neighborhoods Json   // string[]
-  amenities  Json     // string[]
-  moveIn      String  // "asap" | "30" | "60" | "90" | "flexible"
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid())
+  deviceId      String   @unique
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  name          String
+  minPrice      Int
+  maxPrice      Int
+  beds          Json     // number[]
+  neighborhoods Json     // string[]
+  amenities     Json     // string[]
+  moveIn        String   // "asap"|"30"|"60"|"90"|"flexible"
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([deviceId])
 }
 
 model Event {
-  id        String   @id @default(uuid())
-  deviceId  String
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  listingId String
-  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  type      String   // "impression" | "click" | "save" | "hide" | "outbound"
-  metadata  Json?    // e.g. { rank, mode, page }
-  createdAt DateTime @default(now())
+  id                  String            @id @default(uuid())
+  deviceId            String
+  device              Device            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  normalizedListingId String
+  normalizedListing   NormalizedListing @relation(fields: [normalizedListingId], references: [id], onDelete: Cascade)
+  type                String            // "impression"|"click"|"save"|"hide"|"outbound"
+  metadata            Json?
+  createdAt           DateTime          @default(now())
 
   @@index([deviceId, createdAt])
-  @@index([listingId, createdAt])
-  @@index([deviceId, listingId, type, createdAt])
+  @@index([normalizedListingId, createdAt])
+  @@index([deviceId, normalizedListingId, type, createdAt])
 }
 
 model DeviceProfile {
   id        String   @id @default(uuid())
   deviceId  String   @unique
   device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  weights   Json     @default("{}")  // { neighborhood: { Chelsea: 0.7 }, amenity: { Doorman: 0.4 }, borough: {} }
-  stats     Json     @default("{}")  // aggregates: avgPriceClicked, bedsDistribution, etc.
+  weights   Json     @default("{}") // { neighborhood: { Chelsea: 0.7 }, amenity: { Doorman: 0.4 }, borough: {} }
+  stats     Json     @default("{}")
   updatedAt DateTime @updatedAt
 
   @@index([deviceId])

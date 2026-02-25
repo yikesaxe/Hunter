@@ -36,8 +36,8 @@ export function passesHardFilters(
       if (!bedMatch) return false;
     }
   }
-  if (listing.price != null) {
-    if (listing.price < prefs.minPrice || listing.price > prefs.maxPrice) return false;
+  if (listing.rentGross != null) {
+    if (listing.rentGross < prefs.minPrice || listing.rentGross > prefs.maxPrice) return false;
   } else if (!options.includeUnknownPrice) {
     return false;
   }
@@ -58,10 +58,10 @@ export function scoreListing(
   const amenityWeights = w.amenity ?? {};
 
   let budgetFit = 0;
-  if (listing.price != null && prefs.minPrice <= listing.price && listing.price <= prefs.maxPrice) {
+  if (listing.rentGross != null && prefs.minPrice <= listing.rentGross && listing.rentGross <= prefs.maxPrice) {
     const mid = (prefs.minPrice + prefs.maxPrice) / 2;
     const range = prefs.maxPrice - prefs.minPrice || 1;
-    const dist = Math.abs(listing.price - mid) / range;
+    const dist = Math.abs(listing.rentGross - mid) / range;
     budgetFit = Math.max(0, 1 - dist * 2) * BUDGET_WEIGHT; // triangle: best at middle
   }
 

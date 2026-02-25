@@ -1,4 +1,4 @@
-// scraperV2/src/db.ts
+// scraper/src/db.ts
 // Prisma client and helpers to persist listings and crawl runs.
 
 import "dotenv/config";
@@ -12,23 +12,19 @@ const adapter = new PrismaPg({
 });
 const prisma = new PrismaClient({ adapter });
 
-/** Stable SHA-256 hash of listing fields for change detection. */
+/** Stable SHA-256 hash of meaningful listing fields for change detection. */
 function computeContentHash(listing: ListingData): string {
   const obj = {
-    title: listing.title,
     address: listing.address,
     neighborhood: listing.neighborhood,
     borough: listing.borough,
-    price: listing.price,
-    priceDelta: listing.priceDelta,
+    rentGross: listing.price,
     beds: listing.beds,
     baths: listing.baths,
     sqft: listing.sqft,
     description: listing.description ? listing.description.slice(0, 500) : null,
-    features: listing.features?.slice(0, 20) ?? [],
+    amenities: (listing.features ?? []).slice().sort(),
     sourceListingId: listing.sourceListingId,
-    source: listing.source,
-    url: listing.url,
   };
   const sorted = stableStringify(obj);
   return createHash("sha256").update(sorted).digest("hex");
@@ -44,31 +40,24 @@ function stableStringify(value: unknown): string {
   return "{" + parts.join(",") + "}";
 }
 
-const now = new Date();
-
 /**
- * Upsert a listing by (source, sourceListingId) or by url when sourceListingId is missing.
+ * Upsert a NormalizedListing by (source, sourceListingId) or by sourceUrl when sourceListingId is missing.
  * Sets firstSeenAt on create, lastSeenAt and lastScrapedAt on every save.
  */
 export async function upsertListing(listing: ListingData): Promise<void> {
   const contentHash = computeContentHash(listing);
   const amenities = JSON.stringify(listing.features ?? []);
   const photos = JSON.stringify(listing.photos ?? []);
-  const raw = JSON.stringify({
-    borough: listing.borough,
-    extractedBy: listing.extractedBy,
-  });
+  const now = new Date();
 
   const data = {
-    url: listing.url,
-    canonicalUrl: listing.url,
-    title: listing.title,
+    sourceUrl: listing.url,
     address: listing.address,
     neighborhood: listing.neighborhood,
     borough: listing.borough,
     latitude: listing.latitude,
     longitude: listing.longitude,
-    price: listing.price,
+    rentGross: listing.price,
     priceDelta: listing.priceDelta,
     beds: listing.beds,
     baths: listing.baths,
@@ -77,14 +66,13 @@ export async function upsertListing(listing: ListingData): Promise<void> {
     amenities,
     photos,
     contentHash,
-    raw,
     lastSeenAt: now,
     lastScrapedAt: now,
     status: "active",
   };
 
   if (listing.sourceListingId) {
-    await prisma.listing.upsert({
+    await prisma.normalizedListing.upsert({
       where: {
         source_sourceListingId: {
           source: listing.source,
@@ -102,18 +90,18 @@ export async function upsertListing(listing: ListingData): Promise<void> {
     return;
   }
 
-  const existing = await prisma.listing.findFirst({
-    where: { source: listing.source, url: listing.url },
+  const existing = await prisma.normalizedListing.findFirst({
+    where: { source: listing.source, sourceUrl: listing.url },
   });
   if (existing) {
-    await prisma.listing.update({
+    await prisma.normalizedListing.update({
       where: { id: existing.id },
       data,
     });
     return;
   }
 
-  await prisma.listing.create({
+  await prisma.normalizedListing.create({
     data: {
       source: listing.source,
       sourceListingId: null,

@@ -4,7 +4,7 @@ import type { ListingForScoring, PrefsForScoring } from "./types";
 
 const baseListing: ListingForScoring = {
   id: "1",
-  price: 3000,
+  rentGross: 3000,
   beds: 2,
   neighborhood: "Chelsea",
   borough: "Manhattan",
@@ -43,11 +43,11 @@ describe("passesHardFilters", () => {
   });
 
   it("fails when price below min", () => {
-    expect(passesHardFilters({ ...baseListing, price: 1000 }, prefs)).toBe(false);
+    expect(passesHardFilters({ ...baseListing, rentGross: 1000 }, prefs)).toBe(false);
   });
 
   it("fails when price above max", () => {
-    expect(passesHardFilters({ ...baseListing, price: 6000 }, prefs)).toBe(false);
+    expect(passesHardFilters({ ...baseListing, rentGross: 6000 }, prefs)).toBe(false);
   });
 
   it("fails when beds not in prefs", () => {

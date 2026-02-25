@@ -8,7 +8,7 @@ export default async function ListingPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const listing = await prisma.listing.findUnique({ where: { id } });
+  const listing = await prisma.normalizedListing.findUnique({ where: { id } });
   if (!listing) notFound();
 
   const photos: string[] = (() => {
@@ -26,8 +26,8 @@ export default async function ListingPage({
     listing.sqft != null && `${listing.sqft.toLocaleString()} sqft`,
   ].filter(Boolean) as string[];
 
-  const listedDate = listing.listedAt
-    ? new Date(listing.listedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+  const availableDate = listing.availableFrom
+    ? new Date(listing.availableFrom).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
     : null;
   const scrapedDate = new Date(listing.lastScrapedAt).toLocaleDateString("en-US", {
     month: "short", day: "numeric", year: "numeric",
@@ -101,18 +101,11 @@ export default async function ListingPage({
           {/* Left: primary info */}
           <div>
             {/* Price */}
-            {listing.price != null && (
+            {listing.rentGross != null && (
               <p className="font-serif text-5xl font-bold text-[var(--accent)] leading-none mb-4">
-                ${listing.price.toLocaleString()}
+                ${listing.rentGross.toLocaleString()}
                 <span className="text-xl font-sans font-normal text-[var(--muted-light)] ml-2">/mo</span>
               </p>
-            )}
-
-            {/* Title */}
-            {listing.title && (
-              <h1 className="font-serif text-2xl font-semibold text-[var(--foreground)] mb-1 leading-snug">
-                {listing.title}
-              </h1>
             )}
 
             {/* Address */}
@@ -183,9 +176,9 @@ export default async function ListingPage({
           <div className="space-y-4">
             {/* CTA card */}
             <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 shadow-sm">
-              {listing.price != null && (
+              {listing.rentGross != null && (
                 <p className="font-serif text-3xl font-bold text-[var(--foreground)] mb-1">
-                  ${listing.price.toLocaleString()}
+                  ${listing.rentGross.toLocaleString()}
                   <span className="text-sm font-sans font-normal text-[var(--muted-light)] ml-1">/mo</span>
                 </p>
               )}
@@ -194,7 +187,7 @@ export default async function ListingPage({
               )}
               <TrackOutbound
                 listingId={listing.id}
-                href={listing.url}
+                href={listing.sourceUrl}
                 className="w-full flex items-center justify-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors"
               >
                 View on {listing.source}
@@ -248,10 +241,10 @@ export default async function ListingPage({
                     </dd>
                   </div>
                 )}
-                {listedDate && (
+                {availableDate && (
                   <div className="flex justify-between gap-4">
-                    <dt className="text-[var(--muted)]">Listed</dt>
-                    <dd className="font-medium text-[var(--foreground)] text-right">{listedDate}</dd>
+                    <dt className="text-[var(--muted)]">Available</dt>
+                    <dd className="font-medium text-[var(--foreground)] text-right">{availableDate}</dd>
                   </div>
                 )}
                 <div className="flex justify-between gap-4">

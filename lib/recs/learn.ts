@@ -20,7 +20,7 @@ export async function learnFromEvent(
   listingId: string,
   type: "save" | "hide" | "click"
 ): Promise<void> {
-  const listing = await prisma.listing.findUnique({
+  const listing = await prisma.normalizedListing.findUnique({
     where: { id: listingId },
     select: { neighborhood: true, borough: true, amenities: true },
   });

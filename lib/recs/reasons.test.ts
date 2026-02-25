@@ -4,7 +4,7 @@ import type { ListingForScoring, PrefsForScoring, ScoreBreakdown } from "./types
 
 const listing: ListingForScoring = {
   id: "1",
-  price: 3000,
+  rentGross: 3000,
   beds: 2,
   neighborhood: "Chelsea",
   borough: "Manhattan",

@@ -8,7 +8,7 @@ export type PrefsForScoring = {
 
 export type ListingForScoring = {
   id: string;
-  price: number | null;
+  rentGross: number | null;
   beds: number | null;
   neighborhood: string | null;
   borough: string | null;

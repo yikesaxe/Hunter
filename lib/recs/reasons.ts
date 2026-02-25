@@ -8,7 +8,7 @@ export function getMatchReasons(
 ): string[] {
   const reasons: { text: string; sortKey: number }[] = [];
 
-  if (breakdown.budgetFit > 0 && listing.price != null) {
+  if (breakdown.budgetFit > 0 && listing.rentGross != null) {
     reasons.push({ text: "Matches your budget", sortKey: breakdown.budgetFit });
   }
   if (breakdown.bedsFit > 0 && listing.beds != null) {

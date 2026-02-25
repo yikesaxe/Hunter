@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 
 export async function GET() {
   try {
-    const rows = await prisma.listing.findMany({
+    const rows = await prisma.normalizedListing.findMany({
       select: { source: true },
       distinct: ["source"],
       orderBy: { source: "asc" },

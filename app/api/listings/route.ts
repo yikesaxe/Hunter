@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
         ? (profileRow.weights as WeightsProfile)
         : null;
 
-      const rawListings = await prisma.listing.findMany({
+      const rawListings = await prisma.normalizedListing.findMany({
         where: { status: "active" },
         orderBy: { lastSeenAt: "desc" },
         take: Math.max(limit * 3, 200),
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 
       const forScoring: ListingForScoring[] = rawListings.map((l) => ({
         id: l.id,
-        price: l.price,
+        rentGross: l.rentGross,
         beds: l.beds,
         neighborhood: l.neighborhood,
         borough: l.borough,
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
       });
       const top = withScores.slice(0, limit);
       const listingIds = top.map((x) => x.listing.id);
-      const fullListings = await prisma.listing.findMany({
+      const fullListings = await prisma.normalizedListing.findMany({
         where: { id: { in: listingIds } },
       });
       const byId = new Map(fullListings.map((l) => [l.id, l]));
@@ -95,25 +95,25 @@ export async function GET(req: NextRequest) {
       const recentImpressions = await prisma.event.findMany({
         where: {
           deviceId,
-          listingId: { in: listingIds.slice(0, RECOMMENDED_PAGE_SIZE) },
+          normalizedListingId: { in: listingIds.slice(0, RECOMMENDED_PAGE_SIZE) },
           type: "impression",
           createdAt: { gte: sixHoursAgo },
         },
-        select: { listingId: true },
+        select: { normalizedListingId: true },
       });
-      const alreadyLogged = new Set(recentImpressions.map((e) => e.listingId));
+      const alreadyLogged = new Set(recentImpressions.map((e) => e.normalizedListingId));
       const toLog = listingIds
         .slice(0, RECOMMENDED_PAGE_SIZE)
         .filter((id) => !alreadyLogged.has(id));
 
-      for (const listingId of toLog) {
+      for (const normalizedListingId of toLog) {
         try {
           await prisma.event.create({
             data: {
               deviceId,
-              listingId,
+              normalizedListingId,
               type: "impression",
-              metadata: { rank: toLog.indexOf(listingId), mode: "recommended" },
+              metadata: { rank: toLog.indexOf(normalizedListingId), mode: "recommended" },
             },
           });
         } catch (_) {
@@ -145,10 +145,10 @@ export async function GET(req: NextRequest) {
     if (q) {
       where.OR = [
         { address: { contains: q, mode: "insensitive" } },
-        { title: { contains: q, mode: "insensitive" } },
         { neighborhood: { contains: q, mode: "insensitive" } },
         { description: { contains: q, mode: "insensitive" } },
         { borough: { contains: q, mode: "insensitive" } },
+        { sourceUrl: { contains: q, mode: "insensitive" } },
       ];
     }
     if (source) where.source = source;
@@ -156,11 +156,11 @@ export async function GET(req: NextRequest) {
       const priceFilter: { gte?: number; lte?: number } = {};
       if (minPrice) priceFilter.gte = parseInt(minPrice, 10);
       if (maxPrice) priceFilter.lte = parseInt(maxPrice, 10);
-      where.price = priceFilter;
+      where.rentGross = priceFilter;
     }
     if (neighborhood) where.neighborhood = { contains: neighborhood, mode: "insensitive" };
 
-    const listings = await prisma.listing.findMany({
+    const listings = await prisma.normalizedListing.findMany({
       where,
       orderBy: { lastScrapedAt: "desc" },
       take: limit,

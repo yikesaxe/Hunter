@@ -2,12 +2,12 @@ import "dotenv/config";
 import { prisma } from "../lib/db.js";
 
 async function main() {
-  const result = await prisma.listing.deleteMany({
+  const result = await prisma.normalizedListing.deleteMany({
     where: {
       source: "streeteasy",
       OR: [
-        { price: { lt: 800 } },
-        { price: null },
+        { rentGross: { lt: 800 } },
+        { rentGross: null },
       ],
     },
   });

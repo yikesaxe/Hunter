@@ -2,7 +2,7 @@ import "dotenv/config";
 import { prisma } from "../lib/db.js";
 
 async function main() {
-  const result = await prisma.listing.deleteMany({
+  const result = await prisma.normalizedListing.deleteMany({
     where: {
       baths: { gt: 100 },
     },

@@ -7,7 +7,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const listing = await prisma.listing.findUnique({ where: { id } });
+    const listing = await prisma.normalizedListing.findUnique({ where: { id } });
     if (!listing) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(listing);
   } catch (e) {

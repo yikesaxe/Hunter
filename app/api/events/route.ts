@@ -9,18 +9,18 @@ export async function POST(req: NextRequest) {
   try {
     const { deviceId, isNew } = await getOrCreateDevice();
     const body = await req.json();
-    const listingId = typeof body.listingId === "string" ? body.listingId.trim() : "";
+    const normalizedListingId = typeof body.listingId === "string" ? body.listingId.trim() : "";
     const type = EVENT_TYPES.includes(body.type) ? body.type : null;
     const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : undefined;
 
-    if (!listingId || !type) {
+    if (!normalizedListingId || !type) {
       return NextResponse.json(
         { error: "Missing or invalid listingId or type" },
         { status: 400 }
       );
     }
 
-    const listing = await prisma.listing.findUnique({ where: { id: listingId } });
+    const listing = await prisma.normalizedListing.findUnique({ where: { id: normalizedListingId } });
     if (!listing) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
@@ -28,14 +28,14 @@ export async function POST(req: NextRequest) {
     await prisma.event.create({
       data: {
         deviceId,
-        listingId,
+        normalizedListingId,
         type,
         metadata: metadata ?? undefined,
       },
     });
 
     if (type === "save" || type === "hide" || type === "click") {
-      learnFromEvent(deviceId, listingId, type).catch(() => {});
+      learnFromEvent(deviceId, normalizedListingId, type).catch(() => {});
     }
 
     const res = NextResponse.json({ ok: true });
