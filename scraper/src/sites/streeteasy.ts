@@ -25,13 +25,14 @@ function toSlug(name: string): string {
 
 /**
  * Returns one URL covering all provided neighborhoods (comma-joined path).
- * Falls back to /manhattan when no neighborhoods are specified.
+ * Falls back to /manhattan when no neighborhoods are specified or there are too many.
+ * StreetEasy handles up to ~5 neighborhoods in a single slug reliably.
  */
 export function buildStreetEasyUrl(params: SearchParams): string[] {
   const { neighborhoods = [], minPrice, maxPrice, beds, noFee } = params;
 
   const areaSlug =
-    neighborhoods.length > 0
+    neighborhoods.length > 0 && neighborhoods.length <= 5
       ? neighborhoods.map(toSlug).join(",")
       : "manhattan";
 
@@ -40,7 +41,7 @@ export function buildStreetEasyUrl(params: SearchParams): string[] {
   if (minPrice != null || maxPrice != null) {
     const lo = minPrice ?? 0;
     const hi = maxPrice ?? 50000;
-    qs.set("price", `${lo}%2C${hi}`);
+    qs.set("price", `${lo},${hi}`); // URLSearchParams encodes comma to %2C automatically
   }
 
   if (beds && beds.length > 0) {

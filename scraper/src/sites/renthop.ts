@@ -16,31 +16,17 @@ import type { SearchParams } from "./index.js";
 const BASE = "https://www.renthop.com/search/nyc";
 
 /**
- * Returns one URL per (neighborhood × bed count) combination, since RentHop
- * doesn't support multi-neighborhood or multi-bed queries in a single URL.
- * Falls back to a single broad NYC search when no neighborhoods/beds are given.
+ * Returns a single broad RentHop NYC search URL filtered by price range only.
+ * Neighborhood and bed filtering happens at recommendation time, not at crawl time,
+ * to avoid a combinatorial explosion of CrawlJobs.
  */
 export function buildRentHopUrl(params: SearchParams): string[] {
-  const { neighborhoods = [], minPrice, maxPrice, beds, noFee } = params;
+  const { minPrice, maxPrice, noFee } = params;
 
-  const effectiveNeighborhoods = neighborhoods.length > 0 ? neighborhoods : [null];
-  const effectiveBeds = beds && beds.length > 0 ? beds : [null];
+  const qs = new URLSearchParams();
+  if (minPrice != null) qs.set("min_price", String(minPrice));
+  if (maxPrice != null) qs.set("max_price", String(maxPrice));
+  if (noFee) qs.set("no_fee", "1");
 
-  const urls: string[] = [];
-
-  for (const neighborhood of effectiveNeighborhoods) {
-    for (const bed of effectiveBeds) {
-      const qs = new URLSearchParams();
-
-      if (minPrice != null) qs.set("min_price", String(minPrice));
-      if (maxPrice != null) qs.set("max_price", String(maxPrice));
-      if (bed != null) qs.set("bedrooms", String(bed));
-      if (neighborhood != null) qs.set("q", neighborhood);
-      if (noFee) qs.set("no_fee", "1");
-
-      urls.push(`${BASE}?${qs.toString()}`);
-    }
-  }
-
-  return urls;
+  return [`${BASE}?${qs.toString()}`];
 }

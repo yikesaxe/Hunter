@@ -14,29 +14,16 @@ import type { SearchParams } from "./index.js";
 const BASE = "https://leasebreak.com/listings";
 
 /**
- * Returns one URL per (neighborhood × bed count) combination.
- * Falls back to a single broad search when no neighborhoods/beds are given.
+ * Returns a single broad LeaseBreak search URL filtered by price range only.
+ * Neighborhood and bed filtering happens at recommendation time, not at crawl time,
+ * to avoid a combinatorial explosion of CrawlJobs.
  */
 export function buildLeaseBreakUrl(params: SearchParams): string[] {
-  const { neighborhoods = [], minPrice, maxPrice, beds } = params;
+  const { minPrice, maxPrice } = params;
 
-  const effectiveNeighborhoods = neighborhoods.length > 0 ? neighborhoods : [null];
-  const effectiveBeds = beds && beds.length > 0 ? beds : [null];
+  const qs = new URLSearchParams();
+  if (minPrice != null) qs.set("min_rent", String(minPrice));
+  if (maxPrice != null) qs.set("max_rent", String(maxPrice));
 
-  const urls: string[] = [];
-
-  for (const neighborhood of effectiveNeighborhoods) {
-    for (const bed of effectiveBeds) {
-      const qs = new URLSearchParams();
-
-      if (minPrice != null) qs.set("min_rent", String(minPrice));
-      if (maxPrice != null) qs.set("max_rent", String(maxPrice));
-      if (bed != null) qs.set("bedrooms", String(bed));
-      if (neighborhood != null) qs.set("neighborhood", neighborhood);
-
-      urls.push(`${BASE}?${qs.toString()}`);
-    }
-  }
-
-  return urls;
+  return [`${BASE}?${qs.toString()}`];
 }

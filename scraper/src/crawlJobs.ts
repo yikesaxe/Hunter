@@ -103,30 +103,29 @@ const REGISTRY_URLS: Partial<Record<Source, string[]>> = {
 /**
  * Ensure broad registry CrawlJobs exist (deviceId=null).
  * Called once at startup.
+ * Uses findFirst + create because Prisma upsert doesn't support null in @@unique keys.
  */
 export async function ensureRegistryCrawlJobs(): Promise<void> {
   for (const [source, urls] of Object.entries(REGISTRY_URLS)) {
     for (const searchUrl of urls ?? []) {
       const searchUrlHash = hashUrl(searchUrl);
-      await prisma.crawlJob.upsert({
-        where: {
-          deviceId_source_searchUrlHash: {
-            deviceId: null as unknown as string,
-            source,
-            searchUrlHash,
-          },
-        },
-        create: {
-          id: randomUUID(),
-          deviceId: null,
-          source,
-          searchUrl,
-          searchUrlHash,
-          status: "idle",
-          nextRunAt: new Date(),
-        },
-        update: {}, // don't reset state on restart
+      const existing = await prisma.crawlJob.findFirst({
+        where: { deviceId: null, source, searchUrlHash },
+        select: { id: true },
       });
+      if (!existing) {
+        await prisma.crawlJob.create({
+          data: {
+            id: randomUUID(),
+            deviceId: null,
+            source,
+            searchUrl,
+            searchUrlHash,
+            status: "idle",
+            nextRunAt: new Date(),
+          },
+        });
+      }
     }
   }
 }

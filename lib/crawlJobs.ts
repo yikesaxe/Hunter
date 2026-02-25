@@ -25,32 +25,22 @@ function hashUrl(url: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildStreetEasyUrls(p: SearchParams): string[] {
-  const slugs = p.neighborhoods.length > 0
+  const slugs = p.neighborhoods.length > 0 && p.neighborhoods.length <= 5
     ? p.neighborhoods.map((n) => n.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-"))
     : ["manhattan"];
 
   const qs = new URLSearchParams();
-  if (p.minPrice || p.maxPrice) qs.set("price", `${p.minPrice ?? 0}%2C${p.maxPrice ?? 50000}`);
+  if (p.minPrice || p.maxPrice) qs.set("price", `${p.minPrice ?? 0},${p.maxPrice ?? 50000}`);
   if (p.beds.length > 0) qs.set("beds", p.beds.join(","));
   const query = qs.toString();
   return [`https://streeteasy.com/for-rent/${slugs.join(",")}${query ? `?${query}` : ""}`];
 }
 
 function buildRentHopUrls(p: SearchParams): string[] {
-  const hoods = p.neighborhoods.length > 0 ? p.neighborhoods : [null];
-  const beds  = p.beds.length > 0 ? p.beds : [null];
-  const urls: string[] = [];
-  for (const hood of hoods) {
-    for (const bed of beds) {
-      const qs = new URLSearchParams();
-      if (p.minPrice) qs.set("min_price", String(p.minPrice));
-      if (p.maxPrice) qs.set("max_price", String(p.maxPrice));
-      if (bed != null) qs.set("bedrooms", String(bed));
-      if (hood) qs.set("q", hood);
-      urls.push(`https://www.renthop.com/search/nyc?${qs.toString()}`);
-    }
-  }
-  return urls;
+  const qs = new URLSearchParams();
+  if (p.minPrice) qs.set("min_price", String(p.minPrice));
+  if (p.maxPrice) qs.set("max_price", String(p.maxPrice));
+  return [`https://www.renthop.com/search/nyc?${qs.toString()}`];
 }
 
 function buildZillowUrls(p: SearchParams): string[] {
@@ -73,20 +63,10 @@ function buildZillowUrls(p: SearchParams): string[] {
 }
 
 function buildLeaseBreakUrls(p: SearchParams): string[] {
-  const hoods = p.neighborhoods.length > 0 ? p.neighborhoods : [null];
-  const beds  = p.beds.length > 0 ? p.beds : [null];
-  const urls: string[] = [];
-  for (const hood of hoods) {
-    for (const bed of beds) {
-      const qs = new URLSearchParams();
-      if (p.minPrice) qs.set("min_rent", String(p.minPrice));
-      if (p.maxPrice) qs.set("max_rent", String(p.maxPrice));
-      if (bed != null) qs.set("bedrooms", String(bed));
-      if (hood) qs.set("neighborhood", hood);
-      urls.push(`https://leasebreak.com/listings?${qs.toString()}`);
-    }
-  }
-  return urls;
+  const qs = new URLSearchParams();
+  if (p.minPrice) qs.set("min_rent", String(p.minPrice));
+  if (p.maxPrice) qs.set("max_rent", String(p.maxPrice));
+  return [`https://leasebreak.com/listings?${qs.toString()}`];
 }
 
 function buildUrls(source: Source, p: SearchParams): string[] {
