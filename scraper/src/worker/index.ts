@@ -1,72 +1,84 @@
-// scraperV2/src/worker/index.ts
-// Start BullMQ workers for crawl-index and scrape-listing.
+// scraper/src/worker/index.ts
+// Start all BullMQ workers + the scheduler.
 // Run: npm run worker   (requires REDIS_URL and DATABASE_URL)
 
 import "dotenv/config";
 import { startCrawlIndexWorker } from "./crawlIndex.js";
 import { startScrapeListingWorker } from "./scrapeListing.js";
+import { startRefreshWorker, enqueueRefreshes } from "./refresh.js";
+import { startScheduler, stopScheduler } from "./scheduler.js";
 import { closeQueues } from "../queues.js";
+import { prisma } from "../db.js";
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set.");
   process.exit(1);
 }
 
-async function main() {
-  console.log("Starting scraperV2 workers...");
+const REFRESH_ENQUEUE_INTERVAL_MS = 10 * 60 * 1000; // enqueue refreshes every 10 min
 
-  // Handle unhandled promise rejections to prevent crashes
-  process.on("unhandledRejection", (reason, promise) => {
-    console.error("Unhandled Rejection at:", promise, "reason:", reason);
-    // Don't exit - let the worker continue processing other jobs
+async function main() {
+  console.log("Starting Hunter workers…");
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[worker] Unhandled rejection:", reason);
   });
 
-  // Handle uncaught exceptions
   process.on("uncaughtException", (err) => {
-    console.error("Uncaught Exception:", err);
-    // Still exit on uncaught exceptions as they're more serious
+    console.error("[worker] Uncaught exception:", err);
     process.exit(1);
   });
 
+  // ── Start BullMQ workers
   const crawlWorker = startCrawlIndexWorker();
   const scrapeWorker = startScrapeListingWorker();
+  const refreshWorker = startRefreshWorker();
 
-  // Handle worker errors
-  crawlWorker.on("error", (err) => {
-    console.error("[crawl-index worker] Error:", err);
-  });
+  crawlWorker.on("error",   (e) => console.error("[crawl-index] Worker error:", e));
+  scrapeWorker.on("error",  (e) => console.error("[scrape-listing] Worker error:", e));
+  refreshWorker.on("error", (e) => console.error("[refresh] Worker error:", e));
 
-  scrapeWorker.on("error", (err) => {
-    console.error("[scrape-listing worker] Error:", err);
-  });
+  // ── Start scheduler (polls for due CrawlJobs, enqueues crawl-index jobs)
+  await startScheduler();
 
-  console.log("Workers started. Waiting for jobs (crawl-index, scrape-listing).");
+  // ── Periodic refresh enqueuer
+  const refreshTimer = setInterval(async () => {
+    try {
+      const count = await enqueueRefreshes();
+      if (count > 0) console.log(`[refresh] Enqueued ${count} refresh job(s)`);
+    } catch (err) {
+      console.error("[refresh] Enqueue error:", err);
+    }
+  }, REFRESH_ENQUEUE_INTERVAL_MS);
+
+  // Run refresh enqueuer once at startup
+  enqueueRefreshes().then((n) => {
+    if (n > 0) console.log(`[refresh] Enqueued ${n} refresh job(s) at startup`);
+  }).catch(() => {});
+
+  console.log("Workers running: crawl-index, scrape-listing, refresh-listing + scheduler");
 
   const shutdown = async () => {
-    console.log("Shutting down...");
-    try {
-      await crawlWorker.close();
-    } catch (err) {
-      console.error("Error closing crawl worker:", err);
-    }
-    try {
-      await scrapeWorker.close();
-    } catch (err) {
-      console.error("Error closing scrape worker:", err);
-    }
-    try {
-      await closeQueues();
-    } catch (err) {
-      console.error("Error closing queues:", err);
-    }
+    console.log("\n[worker] Shutting down…");
+    stopScheduler();
+    clearInterval(refreshTimer);
+
+    await Promise.allSettled([
+      crawlWorker.close(),
+      scrapeWorker.close(),
+      refreshWorker.close(),
+      closeQueues(),
+      prisma.$disconnect(),
+    ]);
+
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
+  process.on("SIGINT",  shutdown);
   process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {
-  console.error("Fatal error starting workers:", err);
+  console.error("[worker] Fatal startup error:", err);
   process.exit(1);
 });
