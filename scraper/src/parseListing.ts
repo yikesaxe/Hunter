@@ -703,3 +703,73 @@ export function parseListing(html: string, url: string): ListingData {
 
   return data;
 }
+
+// ==========================================================================
+// Pagination
+// ==========================================================================
+
+/**
+ * Extract the "next page" URL from a search results page, or null if there
+ * is no next page (or the site doesn't support link-based pagination).
+ *
+ * Called by crawlIndex after each page fetch to decide whether to continue.
+ */
+export function extractNextPageUrl(html: string, currentUrl: string): string | null {
+  const $ = cheerio.load(html);
+  const source = detectSource(currentUrl);
+
+  // Helper: resolve + return a valid absolute URL, or null
+  function resolve(href: string | undefined): string | null {
+    if (!href) return null;
+    try {
+      const u = new URL(href, currentUrl);
+      u.hash = "";
+      return u.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  // 1. Standard rel="next" link — works for many sites
+  const relNext = $('a[rel="next"], link[rel="next"]').first().attr("href");
+  if (relNext) return resolve(relNext);
+
+  if (source === "streeteasy") {
+    // StreetEasy uses ?page=N query param; next-page link has class containing "next"
+    const link = $('a[class*="next"], a[data-testid*="next"]').first().attr("href");
+    if (link) return resolve(link);
+
+    // Fallback: increment ?page= param
+    const u = new URL(currentUrl);
+    const page = parseInt(u.searchParams.get("page") ?? "1", 10);
+    u.searchParams.set("page", String(page + 1));
+    // Can't know max page; caller must detect empty results
+    return null; // Let caller handle via ?page= increment if needed
+  }
+
+  if (source === "renthop") {
+    // RentHop uses ?page=N
+    const link = $('a[class*="next"], a:contains("Next")').first().attr("href");
+    if (link) return resolve(link);
+    return null;
+  }
+
+  if (source === "zillow") {
+    // Zillow uses JSON-encoded pagination in searchQueryState — too complex to increment here.
+    // The crawlIndex worker handles Zillow pagination via the currentPage field in state.
+    return null;
+  }
+
+  if (source === "leasebreak") {
+    // LeaseBreak typically has a "next" link or page numbers
+    const link = $('a:contains("Next"), a[class*="next"]').first().attr("href");
+    if (link) return resolve(link);
+    return null;
+  }
+
+  // Generic: look for common "next page" patterns
+  const generic = $(
+    'a:contains("Next"), a[aria-label="Next page"], a[class*="pagination-next"]'
+  ).first().attr("href");
+  return resolve(generic);
+}

@@ -30,12 +30,14 @@ export interface CrawlIndexJobData {
   url: string;
   runId: string;
   target?: number;
+  crawlJobId?: string;
 }
 
 export interface ScrapeListingJobData {
   source: string;
   url: string;
   runId: string;
+  crawlJobId?: string;
 }
 
 const defaultJobOptions = {
