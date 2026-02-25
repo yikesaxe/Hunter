@@ -202,7 +202,14 @@ export async function upsertNormalizedListing(
   const amenities = JSON.stringify(data.features ?? []);
   const photos = JSON.stringify(data.photos ?? []);
 
-  // Fields written on every scrape
+  // Validate crawlJobId — stale IDs (e.g. after manual DB wipe) cause FK violations
+  let discoveredByCrawlJobId: string | null = opts.discoveredByCrawlJobId ?? null;
+  if (discoveredByCrawlJobId) {
+    const jobExists = await prisma.crawlJob.findUnique({ where: { id: discoveredByCrawlJobId }, select: { id: true } });
+    if (!jobExists) discoveredByCrawlJobId = null;
+  }
+
+  // Fields written on every scrape (discoveredByCrawlJobId only set at create time)
   const updateData = {
     sourceUrl: data.url,
     address: data.address,
@@ -226,7 +233,6 @@ export async function upsertNormalizedListing(
     consecutiveMisses: 0,
     consecutiveFails: 0,
     nextScrapeAt: computeNextScrapeAt(null),
-    discoveredByCrawlJobId: opts.discoveredByCrawlJobId ?? null,
   };
 
   let existing: { id: string; contentHash: string | null; canonicalUnitId: string | null; status: string } | null = null;
@@ -248,6 +254,7 @@ export async function upsertNormalizedListing(
         sourceListingId: data.sourceListingId,
         ...updateData,
         firstSeenAt: now,
+        discoveredByCrawlJobId,
       },
       update: updateData,
       select: { id: true, contentHash: true, canonicalUnitId: true, status: true },
@@ -283,6 +290,7 @@ export async function upsertNormalizedListing(
           sourceListingId: null,
           ...updateData,
           firstSeenAt: now,
+          discoveredByCrawlJobId,
         },
         select: { id: true },
       });
