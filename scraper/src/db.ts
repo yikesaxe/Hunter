@@ -120,10 +120,12 @@ export async function createRawListing(
 
 type ChangedFields = Record<string, { from: unknown; to: unknown }>;
 
+export type ChangeLogTrigger = "scrape" | "refresh" | "miss-pass";
+
 export async function writeChangeLog(
   normalizedListingId: string,
   changedFields: ChangedFields,
-  trigger: "scrape" | "refresh" | "miss-pass"
+  trigger: ChangeLogTrigger
 ): Promise<void> {
   if (Object.keys(changedFields).length === 0) return;
   await prisma.changeLog.create({
@@ -327,7 +329,7 @@ export async function upsertNormalizedListing(
  */
 export async function markRemoved(
   listingId: string,
-  trigger: "scrape" | "miss-pass"
+  trigger: ChangeLogTrigger
 ): Promise<void> {
   const listing = await prisma.normalizedListing.findUnique({
     where: { id: listingId },
