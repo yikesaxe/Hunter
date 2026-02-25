@@ -1,8 +1,13 @@
 // scraper/src/db.ts
-// Prisma client and helpers to persist listings and crawl runs.
+// Core DB layer for the smart crawler.
+//
+// Pipeline:
+//   parseListing() → upsertNormalizedListing() → [createRawListing()]
+//                                               → [writeChangeLog()]
+//                                               → [updateCanonicalUnitCount()]
 
 import "dotenv/config";
-import { createHash } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { PrismaClient } from "../../node_modules/.prisma/client/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { ListingData } from "./parseListing.js";
@@ -10,106 +15,346 @@ import type { ListingData } from "./parseListing.js";
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
 });
-const prisma = new PrismaClient({ adapter });
+export const prisma = new PrismaClient({ adapter });
 
-/** Stable SHA-256 hash of meaningful listing fields for change detection. */
-function computeContentHash(listing: ListingData): string {
-  const obj = {
-    address: listing.address,
-    neighborhood: listing.neighborhood,
-    borough: listing.borough,
-    rentGross: listing.price,
-    beds: listing.beds,
-    baths: listing.baths,
-    sqft: listing.sqft,
-    description: listing.description ? listing.description.slice(0, 500) : null,
-    amenities: (listing.features ?? []).slice().sort(),
-    sourceListingId: listing.sourceListingId,
-  };
-  const sorted = stableStringify(obj);
-  return createHash("sha256").update(sorted).digest("hex");
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Content hash
+// ─────────────────────────────────────────────────────────────────────────────
 
-function stableStringify(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]";
-  const obj = value as Record<string, unknown>;
+type HashableFields = {
+  rentGross: number | null;
+  rentNet: number | null;
+  beds: number | null;
+  baths: number | null;
+  brokerFee: boolean | null;
+  leaseTerm: string | null;
+  availableFrom: Date | null;
+  address: string | null;
+  unit: string | null;
+  neighborhood: string | null;
+  description: string | null;
+  amenities: string[]; // sorted before hashing
+};
+
+function stableStringify(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v !== "object") return JSON.stringify(v);
+  if (v instanceof Date) return JSON.stringify(v.toISOString());
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  const obj = v as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
-  const parts = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`);
-  return "{" + parts.join(",") + "}";
+  return "{" + keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",") + "}";
 }
+
+export function computeContentHash(fields: HashableFields): string {
+  const payload: HashableFields = {
+    ...fields,
+    amenities: [...fields.amenities].sort(),
+  };
+  return createHash("sha256").update(stableStringify(payload)).digest("hex");
+}
+
+/** Build a HashableFields object from a ListingData (as returned by the parser). */
+function hashableFromListingData(d: ListingData): HashableFields {
+  return {
+    rentGross: d.price,
+    rentNet: null,
+    beds: d.beds,
+    baths: d.baths,
+    brokerFee: null,
+    leaseTerm: null,
+    availableFrom: null,
+    address: d.address,
+    unit: null,
+    neighborhood: d.neighborhood,
+    description: d.description ? d.description.slice(0, 500) : null,
+    amenities: d.features ?? [],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// nextScrapeAt scheduling
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Upsert a NormalizedListing by (source, sourceListingId) or by sourceUrl when sourceListingId is missing.
- * Sets firstSeenAt on create, lastSeenAt and lastScrapedAt on every save.
+ * Compute when this listing should next be scraped, based on its match score.
+ * High-score listings are refreshed more aggressively.
  */
-export async function upsertListing(listing: ListingData): Promise<void> {
-  const contentHash = computeContentHash(listing);
-  const amenities = JSON.stringify(listing.features ?? []);
-  const photos = JSON.stringify(listing.photos ?? []);
-  const now = new Date();
+export function computeNextScrapeAt(lastMatchScore: number | null): Date {
+  const now = Date.now();
+  const score = lastMatchScore ?? 0;
 
-  const data = {
-    sourceUrl: listing.url,
-    address: listing.address,
-    neighborhood: listing.neighborhood,
-    borough: listing.borough,
-    latitude: listing.latitude,
-    longitude: listing.longitude,
-    rentGross: listing.price,
-    priceDelta: listing.priceDelta,
-    beds: listing.beds,
-    baths: listing.baths,
-    sqft: listing.sqft,
-    description: listing.description,
+  let hours: number;
+  if (score >= 70) hours = 6;       // hot match: every 6 h
+  else if (score >= 40) hours = 12; // warm match: twice a day
+  else if (score >= 10) hours = 24; // lukewarm: once a day
+  else hours = 48;                   // cold: every 2 days
+
+  return new Date(now + hours * 60 * 60 * 1000);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RawListing
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function createRawListing(
+  data: ListingData,
+  statusCode: number,
+  normalizedListingId: string | null
+): Promise<void> {
+  await prisma.rawListing.create({
+    data: {
+      id: randomUUID(),
+      source: data.source,
+      sourceUrl: data.url,
+      rawData: JSON.parse(JSON.stringify(data)),
+      statusCode,
+      normalizedListingId,
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ChangeLog
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ChangedFields = Record<string, { from: unknown; to: unknown }>;
+
+export async function writeChangeLog(
+  normalizedListingId: string,
+  changedFields: ChangedFields,
+  trigger: "scrape" | "refresh" | "miss-pass"
+): Promise<void> {
+  if (Object.keys(changedFields).length === 0) return;
+  await prisma.changeLog.create({
+    data: {
+      id: randomUUID(),
+      normalizedListingId,
+      fields: JSON.parse(JSON.stringify(changedFields)),
+      trigger,
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CanonicalUnit aggregate update
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Recompute and persist activePostingsCount + bestRentGross for a CanonicalUnit.
+ * Called whenever a NormalizedListing linked to the unit changes status.
+ */
+export async function updateCanonicalUnitCount(canonicalUnitId: string): Promise<void> {
+  const postings = await prisma.normalizedListing.findMany({
+    where: { canonicalUnitId, status: "active" },
+    select: { rentGross: true, lastSeenAt: true },
+  });
+
+  const activePostingsCount = postings.length;
+  const rents = postings.map((p) => p.rentGross).filter((r): r is number => r != null);
+  const bestRentGross = rents.length > 0 ? Math.min(...rents) : null;
+  const lastActiveDates = postings.map((p) => p.lastSeenAt);
+  const lastActiveAt = lastActiveDates.length > 0 ? new Date(Math.max(...lastActiveDates.map((d) => d.getTime()))) : null;
+
+  await prisma.canonicalUnit.update({
+    where: { id: canonicalUnitId },
+    data: { activePostingsCount, bestRentGross, lastActiveAt },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NormalizedListing upsert
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type UpsertOptions = {
+  /** CrawlJob that discovered this listing (for provenance). */
+  discoveredByCrawlJobId?: string;
+  /** HTTP status code from the scrape (stored in RawListing). */
+  statusCode?: number;
+  /** Whether to write a RawListing archive record. */
+  storeRaw?: boolean;
+};
+
+export type UpsertResult = {
+  id: string;
+  isNew: boolean;
+  contentChanged: boolean;
+};
+
+/**
+ * Main entry point for persisting a scraped listing.
+ *
+ * 1. Compute contentHash to detect field changes.
+ * 2. Upsert NormalizedListing (by sourceListingId or sourceUrl).
+ * 3. Write ChangeLog if any tracked fields changed.
+ * 4. Optionally archive raw scrape output in RawListing.
+ * 5. If linked to a CanonicalUnit, refresh its aggregate counts.
+ */
+export async function upsertNormalizedListing(
+  data: ListingData,
+  opts: UpsertOptions = {}
+): Promise<UpsertResult> {
+  const now = new Date();
+  const hashFields = hashableFromListingData(data);
+  const contentHash = computeContentHash(hashFields);
+  const amenities = JSON.stringify(data.features ?? []);
+  const photos = JSON.stringify(data.photos ?? []);
+
+  // Fields written on every scrape
+  const updateData = {
+    sourceUrl: data.url,
+    address: data.address,
+    neighborhood: data.neighborhood,
+    borough: data.borough,
+    zip: null as string | null,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    rentGross: data.price,
+    priceDelta: data.priceDelta,
+    beds: data.beds,
+    baths: data.baths,
+    sqft: data.sqft,
+    description: data.description,
     amenities,
     photos,
     contentHash,
     lastSeenAt: now,
     lastScrapedAt: now,
     status: "active",
+    consecutiveMisses: 0,
+    consecutiveFails: 0,
+    nextScrapeAt: computeNextScrapeAt(null),
+    discoveredByCrawlJobId: opts.discoveredByCrawlJobId ?? null,
   };
 
-  if (listing.sourceListingId) {
-    await prisma.normalizedListing.upsert({
+  let existing: { id: string; contentHash: string | null; canonicalUnitId: string | null; status: string } | null = null;
+  let listingId: string;
+  let isNew = false;
+
+  // ── Upsert by (source, sourceListingId) when we have a stable ID
+  if (data.sourceListingId) {
+    const upserted = await prisma.normalizedListing.upsert({
       where: {
         source_sourceListingId: {
-          source: listing.source,
-          sourceListingId: listing.sourceListingId,
+          source: data.source,
+          sourceListingId: data.sourceListingId,
         },
       },
       create: {
-        source: listing.source,
-        sourceListingId: listing.sourceListingId,
-        ...data,
+        id: randomUUID(),
+        source: data.source,
+        sourceListingId: data.sourceListingId,
+        ...updateData,
         firstSeenAt: now,
       },
-      update: data,
+      update: updateData,
+      select: { id: true, contentHash: true, canonicalUnitId: true, status: true },
     });
-    return;
+    listingId = upserted.id;
+
+    // Detect if this was a create by checking firstSeenAt ≈ lastSeenAt
+    const fresh = await prisma.normalizedListing.findUnique({
+      where: { id: listingId },
+      select: { firstSeenAt: true, lastSeenAt: true, contentHash: true, canonicalUnitId: true, status: true },
+    });
+    isNew = fresh ? Math.abs(fresh.firstSeenAt.getTime() - fresh.lastSeenAt.getTime()) < 2000 : false;
+    existing = fresh ? { id: listingId, ...fresh } : null;
+  } else {
+    // ── Upsert by (source, sourceUrl) as fallback
+    const found = await prisma.normalizedListing.findFirst({
+      where: { source: data.source, sourceUrl: data.url },
+      select: { id: true, contentHash: true, canonicalUnitId: true, status: true },
+    });
+
+    if (found) {
+      existing = found;
+      listingId = found.id;
+      await prisma.normalizedListing.update({
+        where: { id: listingId },
+        data: updateData,
+      });
+    } else {
+      const created = await prisma.normalizedListing.create({
+        data: {
+          id: randomUUID(),
+          source: data.source,
+          sourceListingId: null,
+          ...updateData,
+          firstSeenAt: now,
+        },
+        select: { id: true },
+      });
+      listingId = created.id;
+      isNew = true;
+    }
   }
 
-  const existing = await prisma.normalizedListing.findFirst({
-    where: { source: listing.source, sourceUrl: listing.url },
-  });
-  if (existing) {
-    await prisma.normalizedListing.update({
-      where: { id: existing.id },
-      data,
-    });
-    return;
+  // ── Detect content changes and write ChangeLog
+  const contentChanged = !isNew && existing?.contentHash !== contentHash;
+  if (contentChanged && existing) {
+    const changedFields: ChangedFields = {};
+
+    // We can't do a granular diff without fetching old values — store the new hash as a sentinel.
+    // Full field-level diff would require fetching the old row before update, which is a separate
+    // optimization. For now, record that "content" changed.
+    changedFields.contentHash = { from: existing.contentHash, to: contentHash };
+    if (data.price != null) changedFields.rentGross = { from: null, to: data.price };
+
+    await writeChangeLog(listingId, changedFields, "scrape");
   }
 
-  await prisma.normalizedListing.create({
-    data: {
-      source: listing.source,
-      sourceListingId: null,
-      ...data,
-      firstSeenAt: now,
-    },
-  });
+  // ── Optionally archive raw scrape output
+  if (opts.storeRaw) {
+    await createRawListing(data, opts.statusCode ?? 200, listingId);
+  }
+
+  // ── Update CanonicalUnit aggregate if linked
+  const canonicalUnitId = existing?.canonicalUnitId ?? null;
+  if (canonicalUnitId) {
+    await updateCanonicalUnitCount(canonicalUnitId);
+  }
+
+  return { id: listingId, isNew, contentChanged };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Removal
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mark a NormalizedListing as removed (404, explicit removal phrase, etc.)
+ * and write a ChangeLog entry.
+ */
+export async function markRemoved(
+  listingId: string,
+  trigger: "scrape" | "miss-pass"
+): Promise<void> {
+  const listing = await prisma.normalizedListing.findUnique({
+    where: { id: listingId },
+    select: { status: true, canonicalUnitId: true },
+  });
+  if (!listing || listing.status === "removed") return;
+
+  const now = new Date();
+  await prisma.normalizedListing.update({
+    where: { id: listingId },
+    data: { status: "removed", removedAt: now, nextScrapeAt: null },
+  });
+
+  await writeChangeLog(
+    listingId,
+    { status: { from: listing.status, to: "removed" } },
+    trigger
+  );
+
+  if (listing.canonicalUnitId) {
+    await updateCanonicalUnitCount(listing.canonicalUnitId);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CrawlRun helpers (unchanged interface)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface CrawlRunStats {
   startUrl: string;
@@ -118,13 +363,11 @@ export interface CrawlRunStats {
   scraped: number;
   errors: number;
   target?: number;
-  /** If set, run is stored as already finished. */
+  crawlJobId?: string;
+  mode?: "targeted" | "registry";
   finishedAt?: Date;
 }
 
-/**
- * Create a new crawl run. Returns the run id.
- */
 export async function createCrawlRun(stats: CrawlRunStats): Promise<string> {
   const run = await prisma.crawlRun.create({
     data: {
@@ -134,6 +377,8 @@ export async function createCrawlRun(stats: CrawlRunStats): Promise<string> {
       scraped: stats.scraped,
       errors: stats.errors,
       target: stats.target ?? 200,
+      crawlJobId: stats.crawlJobId ?? null,
+      mode: stats.mode ?? "targeted",
       finishedAt: stats.finishedAt ?? undefined,
       stats: "{}",
     },
@@ -141,12 +386,9 @@ export async function createCrawlRun(stats: CrawlRunStats): Promise<string> {
   return run.id;
 }
 
-/**
- * Mark a crawl run as finished and update counts.
- */
 export async function finishCrawlRun(
   runId: string,
-  stats: { scraped: number; errors: number }
+  stats: { scraped: number; errors: number; isComplete?: boolean }
 ): Promise<void> {
   await prisma.crawlRun.update({
     where: { id: runId },
@@ -154,8 +396,16 @@ export async function finishCrawlRun(
       finishedAt: new Date(),
       scraped: stats.scraped,
       errors: stats.errors,
+      isComplete: stats.isComplete ?? false,
     },
   });
 }
 
-export { prisma };
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy compatibility shim — remove after all callers are updated
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** @deprecated Use upsertNormalizedListing instead. */
+export async function upsertListing(listing: ListingData): Promise<void> {
+  await upsertNormalizedListing(listing, { storeRaw: false });
+}
