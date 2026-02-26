@@ -95,6 +95,18 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
       return;
     }
 
+    // ── Empty parse guard: if no price, address, or beds were extracted, the page is
+    //    likely bot-blocked (e.g. Zillow's secondary anti-bot returns HTTP 200 with a
+    //    denial page that has an unfamiliar phrase). Don't store empty rows.
+    if (parsed.price == null && parsed.address == null && parsed.beds == null) {
+      console.log(`[scrape-listing] Empty parse (blocked/unrecognized denial): ${url}`);
+      await prisma.crawlRun.update({
+        where: { id: runId },
+        data: { errors: { increment: 1 } },
+      });
+      return;
+    }
+
     // ── Soft removal: removal phrase in page content
     if (isRemovalPage(result.html)) {
       console.log(`[scrape-listing] Removal phrase detected: ${url}`);

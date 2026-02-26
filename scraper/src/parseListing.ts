@@ -27,7 +27,15 @@ export interface ListingData {
 }
 
 /** Cloudflare/challenge pages often parse to this; treat as blocked, not a real listing. */
-const CHALLENGE_PHRASES = ["performing security verification", "just a moment", "checking your browser", "enable javascript and cookies"];
+const CHALLENGE_PHRASES = [
+  "performing security verification",
+  "just a moment",
+  "checking your browser",
+  "enable javascript and cookies",
+  "access to this page has been denied",
+  "your request has been blocked",
+  "access denied",
+];
 
 export function isChallengePage(listing: ListingData): boolean {
   const t = (listing.title || "").toLowerCase().trim();
