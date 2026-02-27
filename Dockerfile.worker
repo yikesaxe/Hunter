@@ -12,25 +12,42 @@
 
 FROM node:20-slim
 
-# Install system Chromium + all its dependencies.
-# We use the OS-packaged Chromium and point rebrowser-playwright to it via env var
-# instead of using playwright's browser installer (which breaks on rebrowser-playwright fork).
+# System packages needed by Chromium headless
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium \
+    ca-certificates \
     fonts-noto-color-emoji \
+    # Core Chromium runtime deps
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
-
-# Point rebrowser-playwright (Playwright fork) at the system Chromium binary.
-# Also skip the post-install browser download that npm triggers.
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
 COPY package*.json ./
 
-# Install all deps (dev included — prisma CLI is a devDep, needed for generate)
+# Skip rebrowser-playwright's browser download during npm install
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Install all deps (dev included — prisma CLI is a devDep)
 RUN npm ci
+
+# Install the exact Chromium build rebrowser-playwright v1.52 expects.
+# We use `npx playwright@1.52` (runs transiently via npx) because rebrowser-playwright's
+# own CLI has a broken import from the `playwright` package.
+RUN npx playwright@1.52 install chromium --with-deps
 
 COPY . .
 
