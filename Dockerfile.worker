@@ -12,32 +12,32 @@
 
 FROM node:20-slim
 
-# Playwright's --with-deps installer needs apt + ca-certificates
+# Install system Chromium + all its dependencies.
+# We use the OS-packaged Chromium and point rebrowser-playwright to it via env var
+# instead of using playwright's browser installer (which breaks on rebrowser-playwright fork).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+    chromium \
     fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
+
+# Point rebrowser-playwright (Playwright fork) at the system Chromium binary.
+# Also skip the post-install browser download that npm triggers.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
 COPY package*.json ./
 
-# Skip browser auto-download during npm install — we install it explicitly below
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
-# Install all deps (dev included — needed for `prisma` CLI at generate time)
+# Install all deps (dev included — prisma CLI is a devDep, needed for generate)
 RUN npm ci
-
-# Install Playwright's pinned Chromium build + all its system deps (libnss3, etc.)
-# rebrowser-playwright is a fork of playwright-core and uses the same install mechanism
-RUN npx playwright install chromium --with-deps
 
 COPY . .
 
 # Generate Prisma client
 RUN npx prisma generate
 
-# Run headless — no display on Railway servers
+# Run headless — no display available on Railway servers
 ENV SCRAPER_HEADLESS=true
 
 # On startup: apply any pending migrations, then start the worker
