@@ -1,0 +1,24 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# local secrets — never ship these
+.env
+.env.local
+.env.*.local
+
+# scraper runtime dirs (large, ephemeral)
+debug/
+sessions/
+
+# prisma generated client (rebuilt inside image)
+generated/
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+.vscode/
+.idea/

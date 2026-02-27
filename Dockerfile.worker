@@ -1,0 +1,44 @@
+# Dockerfile.worker — BullMQ scraper worker for cloud deployment (Railway / Fly.io / Render)
+#
+# Required env vars:
+#   DATABASE_URL      postgresql://...
+#   REDIS_URL         redis://... or rediss://...
+#   SCRAPER_HEADLESS  true
+#
+# Optional:
+#   PROXY_URL         residential proxy (user:pass@host:port)
+#   FIRECRAWL_API_KEY Firecrawl last-resort fallback
+#   FLARESOLVERR_URL  self-hosted Cloudflare bypass sidecar
+
+FROM node:20-slim
+
+# Playwright's --with-deps installer needs apt + ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package*.json ./
+
+# Skip browser auto-download during npm install — we install it explicitly below
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Install all deps (dev included — needed for `prisma` CLI at generate time)
+RUN npm ci
+
+# Install Playwright's pinned Chromium build + all its system deps (libnss3, etc.)
+# rebrowser-playwright is a fork of playwright-core and uses the same install mechanism
+RUN npx playwright install chromium --with-deps
+
+COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Run headless — no display on Railway servers
+ENV SCRAPER_HEADLESS=true
+
+# On startup: apply any pending migrations, then start the worker
+CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx scraper/src/worker/index.ts"]

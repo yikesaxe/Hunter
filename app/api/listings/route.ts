@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const minPrice = searchParams.get("minPrice")?.trim();
     const maxPrice = searchParams.get("maxPrice")?.trim();
     const neighborhood = searchParams.get("neighborhood")?.trim();
-    const limit = Math.min(100, parseInt(searchParams.get("limit") ?? "50", 10) || 50);
+    const limit = Math.min(500, parseInt(searchParams.get("limit") ?? "50", 10) || 50);
 
     if (mode === "recommended") {
       const { deviceId, isNew } = await getOrCreateDevice();
@@ -160,12 +160,15 @@ export async function GET(req: NextRequest) {
     }
     if (neighborhood) where.neighborhood = { contains: neighborhood, mode: "insensitive" };
 
-    const listings = await prisma.normalizedListing.findMany({
-      where,
-      orderBy: { lastScrapedAt: "desc" },
-      take: limit,
-    });
-    return NextResponse.json(listings);
+    const [listings, total] = await Promise.all([
+      prisma.normalizedListing.findMany({
+        where,
+        orderBy: { lastScrapedAt: "desc" },
+        take: limit,
+      }),
+      prisma.normalizedListing.count({ where }),
+    ]);
+    return NextResponse.json({ listings, total });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Failed to fetch listings" }, { status: 500 });

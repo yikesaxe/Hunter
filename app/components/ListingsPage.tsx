@@ -183,6 +183,8 @@ type ListMode = "search" | "recommended";
 
 export function ListingsPage() {
   const [listings, setListings] = useState<Listing[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [limit, setLimit] = useState(50);
   const [sources, setSources] = useState<string[]>([]);
   const [mode, setMode] = useState<ListMode>("search");
   const [q, setQ] = useState("");
@@ -190,6 +192,7 @@ export function ListingsPage() {
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -201,28 +204,40 @@ export function ListingsPage() {
 
   useEffect(() => {
     setLoading(true);
+    setLimit(50); // reset limit on filter change
+  }, [mode, q, source, minPrice, maxPrice]);
+
+  useEffect(() => {
     if (mode === "recommended") {
       fetch("/api/listings?mode=recommended&limit=50", { credentials: "include" })
         .then((r) => r.json())
-        .then((data) => setListings(Array.isArray(data) ? data : (data?.listings ?? [])))
+        .then((data) => {
+          const arr = Array.isArray(data) ? data : (data?.listings ?? []);
+          setListings(arr);
+          setTotal(data?.total ?? arr.length);
+        })
         .catch(console.error)
-        .finally(() => setLoading(false));
+        .finally(() => { setLoading(false); setLoadingMore(false); });
     } else {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (source) params.set("source", source);
       if (minPrice) params.set("minPrice", minPrice);
       if (maxPrice) params.set("maxPrice", maxPrice);
-      params.set("limit", "50");
+      params.set("limit", String(limit));
       fetch(`/api/listings?${params}`)
         .then((r) => r.json())
-        .then(setListings)
+        .then((data) => {
+          setListings(data.listings ?? data);
+          setTotal(data.total ?? (data.listings ?? data).length);
+        })
         .catch(console.error)
-        .finally(() => setLoading(false));
+        .finally(() => { setLoading(false); setLoadingMore(false); });
     }
-  }, [mode, q, source, minPrice, maxPrice]);
+  }, [mode, q, source, minPrice, maxPrice, limit]);
 
   const visibleListings = listings.filter((l) => !hiddenIds.has(l.id));
+  const hasMore = mode === "search" && listings.length < total;
 
   return (
     <div className="mx-auto max-w-6xl px-5 sm:px-8 py-10">
@@ -233,7 +248,11 @@ export function ListingsPage() {
             NYC Apartments
           </h1>
           <p className="text-sm text-[var(--muted)]">
-            {loading ? "Loading…" : `${visibleListings.length} listing${visibleListings.length !== 1 ? "s" : ""} found`}
+            {loading
+              ? "Loading…"
+              : total > visibleListings.length
+              ? `Showing ${visibleListings.length} of ${total.toLocaleString()} listing${total !== 1 ? "s" : ""}`
+              : `${total.toLocaleString()} listing${total !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex rounded-lg border border-[var(--border)] p-0.5 bg-[var(--surface)]">
@@ -341,6 +360,7 @@ export function ListingsPage() {
           </p>
         </div>
       ) : (
+        <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {visibleListings.map((listing, i) => (
             <ListingCard
@@ -352,6 +372,19 @@ export function ListingsPage() {
             />
           ))}
         </div>
+        {hasMore && (
+          <div className="mt-10 flex justify-center">
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => { setLoadingMore(true); setLimit((l) => l + 50); }}
+              className="px-6 py-2.5 text-sm font-medium rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : `Load more (${total - listings.length} remaining)`}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

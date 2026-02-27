@@ -174,12 +174,24 @@ function getCookiesForDomain(url: string): string {
 function storeCookies(url: string, headers: Headers) {
   const domain = getDomain(url);
   const setCookies = headers.getSetCookie?.() || [];
-  if (setCookies.length > 0) {
-    const existing = cookieJar.get(domain) || "";
-    const newCookies = setCookies.map((c) => c.split(";")[0]).join("; ");
-    cookieJar.set(domain, existing ? `${existing}; ${newCookies}` : newCookies);
-    console.log(`  [cookies] Stored ${setCookies.length} cookie(s) for ${domain}`);
+  if (setCookies.length === 0) return;
+
+  // Merge into a name→value map to prevent unbounded growth (avoids Cloudflare 400)
+  const cookieMap = new Map<string, string>();
+  const existing = cookieJar.get(domain) || "";
+  if (existing) {
+    for (const pair of existing.split("; ")) {
+      const idx = pair.indexOf("=");
+      if (idx > 0) cookieMap.set(pair.slice(0, idx), pair.slice(idx + 1));
+    }
   }
+  for (const raw of setCookies) {
+    const kv = raw.split(";")[0].trim();
+    const idx = kv.indexOf("=");
+    if (idx > 0) cookieMap.set(kv.slice(0, idx), kv.slice(idx + 1));
+  }
+  cookieJar.set(domain, [...cookieMap.entries()].map(([k, v]) => `${k}=${v}`).join("; "));
+  console.log(`  [cookies] Stored ${setCookies.length} cookie(s) for ${domain} (total: ${cookieMap.size})`);
 }
 
 async function httpFetch(url: string): Promise<{
@@ -221,8 +233,11 @@ async function httpFetch(url: string): Promise<{
 }
 
 // ==========================================================================
-// rebrowser-playwright render (Tier 1) -- headed mode + CDP patches + session persistence
+// rebrowser-playwright render (Tier 1) -- headed/headless mode + CDP patches + session persistence
+// Set SCRAPER_HEADLESS=true for server deployments (no display available).
 // ==========================================================================
+
+const HEADLESS = process.env.SCRAPER_HEADLESS === "true";
 
 function getSessionPath(domain: string): string {
   return join(SESSIONS_DIR, `${domain}.json`);
@@ -244,7 +259,7 @@ async function renderPage(url: string, proxyUrl?: string): Promise<{
 
   // Anti-detection args (undetected-chromedriver / stealth style): hide automation flags
   const launchOptions: Record<string, unknown> = {
-    headless: false,
+    headless: HEADLESS,
     args: [
       "--no-sandbox",
       "--disable-blink-features=AutomationControlled",
