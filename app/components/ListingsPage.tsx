@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Listing = {
   id: string;
@@ -42,6 +42,20 @@ function trackEvent(listingId: string, type: "click" | "save" | "hide") {
   }).catch(() => {});
 }
 
+// Parse photos whether they come as a JSON string or already-parsed array
+function parsePhotos(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw as string[];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 function ListingCard({
   listing,
   index,
@@ -55,9 +69,40 @@ function ListingCard({
   onHide?: (id: string) => void;
   showActions?: boolean;
 }) {
-  const photos = Array.isArray(listing.photos) ? (listing.photos as string[]) : [];
-  const photo = photos[0] ?? null;
-  const [imgFailed, setImgFailed] = useState(false);
+  const photos = parsePhotos(listing.photos);
+  const [photoIdx, setPhotoIdx] = useState(0);
+  const [failedSet, setFailedSet] = useState<Set<number>>(new Set());
+  // Crossfade: briefly drop opacity when changing photos
+  const [imgOpacity, setImgOpacity] = useState(1);
+  const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const currentPhoto = photos[photoIdx] ?? null;
+  const isCurrentFailed = failedSet.has(photoIdx);
+  const showImage = currentPhoto !== null && !isCurrentFailed;
+
+  const navigate = (dir: 1 | -1, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (photos.length <= 1) return;
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    setImgOpacity(0.35);
+    fadeTimer.current = setTimeout(() => {
+      setPhotoIdx((i) => (i + dir + photos.length) % photos.length);
+      setImgOpacity(1);
+    }, 110);
+  };
+
+  const goTo = (i: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (i === photoIdx) return;
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    setImgOpacity(0.35);
+    fadeTimer.current = setTimeout(() => {
+      setPhotoIdx(i);
+      setImgOpacity(1);
+    }, 110);
+  };
 
   const initials = (listing.neighborhood ?? listing.address ?? "NYC")
     .replace(/[^a-zA-Z\s]/g, "")
@@ -70,22 +115,27 @@ function ListingCard({
 
   return (
     <div
-      className="group block bg-[var(--card)] rounded-xl overflow-hidden border border-[var(--border)] hover:border-[var(--accent)] hover:shadow-lg transition-all duration-300 animate-fade-up"
+      className="group bg-[var(--card)] rounded-xl overflow-hidden border border-[var(--border)] hover:border-[var(--accent)] hover:shadow-lg transition-all duration-300 animate-fade-up"
       style={{ animationDelay: `${Math.min(index * 35, 400)}ms` }}
     >
-    <a
-      href={`/listings/${listing.id}`}
-      className="block"
-      onClick={() => trackEvent(listing.id, "click")}
-    >
-      {/* Photo */}
-      <div className="relative aspect-[4/3] overflow-hidden bg-[var(--surface)]">
-        {photo && !imgFailed ? (
+      {/* ── Photo area ── */}
+      <a
+        href={`/listings/${listing.id}`}
+        className="block relative aspect-[4/3] overflow-hidden bg-[var(--surface)]"
+        onClick={() => trackEvent(listing.id, "click")}
+      >
+        {showImage ? (
           <img
-            src={photo}
+            src={currentPhoto}
             alt={listing.address ?? "Listing photo"}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
-            onError={() => setImgFailed(true)}
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover"
+            style={{
+              opacity: imgOpacity,
+              transform: imgOpacity < 1 ? "scale(1.01)" : "scale(1)",
+              transition: "opacity 0.22s ease, transform 0.22s ease",
+            }}
+            onError={() => setFailedSet((s) => new Set(s).add(photoIdx))}
           />
         ) : (
           <div
@@ -97,13 +147,79 @@ function ListingCard({
             </span>
           </div>
         )}
-        <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-[var(--border)]">
+
+        {/* Gradient scrim — bottom, for dots / counter legibility */}
+        {photos.length > 0 && (
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
+        )}
+
+        {/* Source badge — top right */}
+        <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
           {listing.source}
         </span>
-      </div>
 
-      {/* Body */}
-      <div className="p-4">
+        {/* Photo counter — top left, only when multiple photos */}
+        {photos.length > 1 && (
+          <span className="absolute top-3 left-3 bg-black/45 backdrop-blur-sm text-white text-[10px] font-medium tabular-nums px-2 py-0.5 rounded-full">
+            {photoIdx + 1} / {photos.length}
+          </span>
+        )}
+
+        {/* Prev / Next arrows — visible on card hover */}
+        {photos.length > 1 && (
+          <>
+            <button
+              type="button"
+              aria-label="Previous photo"
+              onClick={(e) => navigate(-1, e)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-white transition-all duration-200 hover:scale-110"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label="Next photo"
+              onClick={(e) => navigate(1, e)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm shadow-md flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-white transition-all duration-200 hover:scale-110"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </>
+        )}
+
+        {/* Dot indicators — bottom center */}
+        {photos.length > 1 && photos.length <= 10 && (
+          <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+            {photos.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-label={`Photo ${i + 1}`}
+                onClick={(e) => goTo(i, e)}
+                className="transition-all duration-200"
+                style={{
+                  width: i === photoIdx ? "16px" : "6px",
+                  height: "6px",
+                  borderRadius: "3px",
+                  background: i === photoIdx ? "white" : "rgba(255,255,255,0.55)",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </a>
+
+      {/* ── Card body ── */}
+      <a
+        href={`/listings/${listing.id}`}
+        className="block p-4"
+        onClick={() => trackEvent(listing.id, "click")}
+      >
         {listing.price != null && (
           <p className="font-serif text-2xl font-semibold text-[var(--accent)] leading-none mb-2.5">
             ${listing.price.toLocaleString()}
@@ -155,26 +271,27 @@ function ListingCard({
             ))}
           </div>
         )}
-      </div>
-    </a>
-    {showActions && (
-      <div className="flex items-center gap-2 px-4 pb-4" onClick={(e) => e.preventDefault()}>
-        <button
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); trackEvent(listing.id, "save"); onSave?.(listing.id); }}
-          className="text-xs font-medium text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); trackEvent(listing.id, "hide"); onHide?.(listing.id); }}
-          className="text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-        >
-          Hide
-        </button>
-      </div>
-    )}
+      </a>
+
+      {/* ── Save / Hide actions ── */}
+      {showActions && (
+        <div className="flex items-center gap-2 px-4 pb-4">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); trackEvent(listing.id, "save"); onSave?.(listing.id); }}
+            className="text-xs font-medium text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); trackEvent(listing.id, "hide"); onHide?.(listing.id); }}
+            className="text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+          >
+            Hide
+          </button>
+        </div>
+      )}
     </div>
   );
 }

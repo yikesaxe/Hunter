@@ -106,6 +106,7 @@ const BLOCKED_KEYWORDS = [
 const THIN_PAGE_THRESHOLD = 500;
 
 export function isBlockedOrThin(html: string, statusCode: number): { blocked: boolean; reason: string } {
+  if (statusCode === 400) return { blocked: true, reason: "400 Bad Request (likely cookie/header too large)" };
   if (statusCode === 403) return { blocked: true, reason: "403 Forbidden" };
   if (statusCode === 429) return { blocked: true, reason: "429 Too Many Requests" };
   if (html.length < THIN_PAGE_THRESHOLD) return { blocked: true, reason: `Thin page (${html.length} chars)` };

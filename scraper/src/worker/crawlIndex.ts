@@ -10,6 +10,19 @@ import { fetchPage } from "../fetchPage.js";
 import { extractListingUrls, extractNextPageUrl } from "../parseListing.js";
 import { markRemoved } from "../db.js";
 
+/**
+ * Domains whose index/search pages are JavaScript-rendered and require a headed
+ * browser to surface listing links. These always use forceRender=true for index fetches.
+ */
+const BROWSER_RENDER_INDEX_DOMAINS = new Set([
+  "leasebreak.com", "www.leasebreak.com",
+  "streeteasy.com", "www.streeteasy.com",
+]);
+
+function getDomainHostname(url: string): string {
+  try { return new URL(url).hostname; } catch { return ""; }
+}
+
 /** Freshness gate: skip URLs scraped more recently than this. */
 const FRESHNESS_HOURS = 4;
 
@@ -39,7 +52,9 @@ async function processCrawlIndex(job: Job<CrawlIndexJobData>): Promise<void> {
 
     let html: string;
     try {
-      const result = await fetchPage(currentUrl, false);
+      const forceRender = BROWSER_RENDER_INDEX_DOMAINS.has(getDomainHostname(currentUrl));
+      if (forceRender) console.log(`  [crawl-index] Using browser render for ${getDomainHostname(currentUrl)} index page`);
+      const result = await fetchPage(currentUrl, forceRender);
       html = result.html;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

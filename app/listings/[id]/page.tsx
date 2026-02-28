@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { TrackOutbound } from "@/app/components/TrackOutbound";
+import { ListingPhotoGallery } from "@/app/components/ListingPhotoGallery";
 
 export default async function ListingPage({
   params,
@@ -18,7 +19,6 @@ export default async function ListingPage({
     try { return JSON.parse(listing.amenities); } catch { return []; }
   })();
 
-  const heroPhoto = photos[0] ?? null;
 
   const specs = [
     listing.beds != null && `${listing.beds} ${listing.beds === 1 ? "bed" : "beds"}`,
@@ -35,61 +35,34 @@ export default async function ListingPage({
 
   return (
     <div className="min-h-screen bg-[var(--background)]">
-      {/* Hero */}
-      <div className="relative w-full bg-[var(--surface)]" style={{ height: "clamp(260px, 40vw, 520px)" }}>
-        {heroPhoto ? (
-          <img
-            src={heroPhoto}
-            alt={listing.address ?? "Listing"}
-            className="w-full h-full object-cover"
-          />
-        ) : (
+      {/* Photo gallery — hero + thumbnails (client component for interactivity) */}
+      {photos.length > 0 ? (
+        <ListingPhotoGallery
+          photos={photos}
+          source={listing.source}
+          address={listing.address}
+        />
+      ) : (
+        <div className="relative w-full bg-[var(--surface)]" style={{ height: "clamp(280px, 44vw, 560px)" }}>
           <div
             className="w-full h-full flex items-end pb-10 pl-10"
-            style={{
-              background: "linear-gradient(135deg, #E8E0D5 0%, #C8BAA8 50%, #D4C9B8 100%)",
-            }}
+            style={{ background: "linear-gradient(135deg, #E8E0D5 0%, #C8BAA8 50%, #D4C9B8 100%)" }}
           >
             <span className="font-serif text-8xl font-bold text-white/30 select-none leading-none">
               {(listing.neighborhood ?? listing.borough ?? "NYC")[0]}
             </span>
           </div>
-        )}
-        {/* Gradient overlay at bottom */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-
-        {/* Back button */}
-        <div className="absolute top-5 left-5">
-          <a
-            href="/"
-            className="inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-[var(--foreground)] text-sm font-medium px-3 py-1.5 rounded-full border border-white/50 hover:bg-white transition-colors shadow-sm"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-            Back
-          </a>
-        </div>
-
-        {/* Source badge */}
-        <div className="absolute top-5 right-5">
-          <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-semibold uppercase tracking-widest px-3 py-1.5 rounded-full border border-white/50 shadow-sm">
-            {listing.source}
-          </span>
-        </div>
-      </div>
-
-      {/* Photo strip (additional photos) */}
-      {photos.length > 1 && (
-        <div className="bg-[var(--foreground)]">
-          <div className="mx-auto max-w-6xl px-5 sm:px-8">
-            <div className="flex gap-2 py-2 overflow-x-auto scrollbar-hide">
-              {photos.slice(1, 8).map((src, i) => (
-                <div key={i} className="flex-none w-24 h-16 rounded overflow-hidden bg-[var(--surface)]">
-                  <img src={src} alt={`Photo ${i + 2}`} className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" />
-                </div>
-              ))}
-            </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+          <div className="absolute top-5 left-5">
+            <a href="/" className="inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-[var(--foreground)] text-sm font-medium px-3 py-1.5 rounded-full border border-white/50 hover:bg-white transition-colors shadow-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+              Back
+            </a>
+          </div>
+          <div className="absolute top-5 right-5">
+            <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-semibold uppercase tracking-widest px-3 py-1.5 rounded-full border border-white/50 shadow-sm">
+              {listing.source}
+            </span>
           </div>
         </div>
       )}

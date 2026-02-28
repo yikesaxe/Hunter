@@ -298,7 +298,8 @@ function extractFromLeasebreak($: cheerio.CheerioAPI, url: string, data: Listing
     if (data.photos.length > 0) found = true;
   }
   if (!data.sourceListingId) {
-    const match = url.match(/rental-details\/(\d+)\//);
+    // Matches both /short-term-rental-details/123/ and /rental-details/123/
+    const match = url.match(/(?:short-term-)?rental-details\/(\d+)\//);
     if (match) { data.sourceListingId = match[1]; found = true; }
   }
 
@@ -624,10 +625,11 @@ export function extractListingUrls(html: string, url: string): string[] {
   }
 
   if (source === "leasebreak") {
-    // Leasebreak listing URLs: /short-term-rental-details/{id}/{slug}
-    $('a[href*="/short-term-rental-details/"]').each((_, el) => {
+    // Leasebreak listing URLs: /short-term-rental-details/{id}/{slug} or /rental-details/{id}/{slug}
+    // Accept both patterns in case the site changed its URL structure.
+    $('a[href*="rental-details/"]').each((_, el) => {
       const href = $(el).attr("href");
-      if (href && /\/short-term-rental-details\/\d+\//.test(href)) addUrl(href);
+      if (href && /\/(short-term-)?rental-details\/\d+\//.test(href)) addUrl(href);
     });
   } else if (source === "streeteasy") {
     // StreetEasy: /rental/{id} or /building/{name}/{unit}
@@ -747,12 +749,16 @@ export function extractNextPageUrl(html: string, currentUrl: string): string | n
     const link = $('a[class*="next"], a[data-testid*="next"]').first().attr("href");
     if (link) return resolve(link);
 
-    // Fallback: increment ?page= param
-    const u = new URL(currentUrl);
-    const page = parseInt(u.searchParams.get("page") ?? "1", 10);
-    u.searchParams.set("page", String(page + 1));
-    // Can't know max page; caller must detect empty results
-    return null; // Let caller handle via ?page= increment if needed
+    // Fallback: URL-based page increment.
+    // The crawlIndex stops naturally when a page returns 0 listing URLs.
+    try {
+      const u = new URL(currentUrl);
+      const page = parseInt(u.searchParams.get("page") ?? "1", 10);
+      u.searchParams.set("page", String(page + 1));
+      return u.toString();
+    } catch {
+      return null;
+    }
   }
 
   if (source === "renthop") {
