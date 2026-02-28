@@ -555,39 +555,63 @@ export async function fetchPage(url: string, forceRender = false): Promise<Fetch
   let html: string = "", statusCode: number = 0, finalUrl: string = url, method: string = "unknown";
   let httpTimeMs = 0, playwrightTimeMs = 0;
 
-  // All known sites that benefit from a residential proxy when rendering via rebrowser.
-  // Leasebreak is included because crawlIndex now force-renders its index page.
-  const PROXY_DOMAINS = new Set([
+  // Sites that reliably block plain HTTP/rebrowser — skip straight to FlareSolverr when available.
+  const FLARESOLVERR_DOMAINS = new Set([
     "leasebreak.com", "www.leasebreak.com",
     "streeteasy.com", "www.streeteasy.com",
-    "zillow.com", "www.zillow.com",
     "renthop.com", "www.renthop.com",
-    "apartments.com", "www.apartments.com",
+    "zillow.com", "www.zillow.com",
   ]);
 
   const domain = getDomain(url);
   const hostname = new URL(url).hostname;
-  const proxyUrl = PROXY_DOMAINS.has(hostname) ? (process.env.PROXY_URL || undefined) : undefined;
+  const hasFlareSolverr = !!process.env.FLARESOLVERR_URL;
+  const skipToFlareSolverr = FLARESOLVERR_DOMAINS.has(hostname) && hasFlareSolverr && !forceRender;
 
-  if (proxyUrl) console.log(`  [proxy] Will use proxy for ${domain}`);
-  else if (process.env.PROXY_URL) console.log(`  [no-proxy] Skipping proxy for ${domain}`);
+  if (skipToFlareSolverr) {
+    // Fast path: go straight to FlareSolverr for known bot-protected domains
+    console.log(`  [shortcut] Using FlareSolverr directly for ${domain}`);
+    try {
+      const fsStart = Date.now();
+      const fs = await fetchViaFlareSolverr(url);
+      return {
+        html: fs.html, statusCode: fs.statusCode, finalUrl: fs.finalUrl,
+        method: "FlareSolverr",
+        httpTimeMs: 0, playwrightTimeMs: 0,
+        totalTimeMs: Date.now() - startTime,
+      };
+    } catch (e) {
+      console.warn(`  FlareSolverr failed, falling back to HTTP → rebrowser: ${e instanceof Error ? e.message : e}`);
+      // Fall through to normal flow below
+    }
+  }
 
   if (forceRender) {
-    // Skip HTTP, go straight to rebrowser (+ proxy if configured)
+    // Skip HTTP, go straight to rebrowser, then FlareSolverr if still blocked
     const pwStart = Date.now();
-    const r = await renderPage(url, proxyUrl);
+    const r = await renderPage(url, undefined);
     playwrightTimeMs = Date.now() - pwStart;
     html = r.html; statusCode = r.statusCode; finalUrl = r.finalUrl;
-    method = proxyUrl ? "rebrowser + proxy" : "rebrowser";
+    method = "rebrowser";
 
     const blockCheck = isBlockedOrThin(html, statusCode);
     if (blockCheck.blocked) {
       dumpDebug(url, html, statusCode, "rebrowser", r.responseHeaders);
-      console.warn(`  rebrowser blocked (${blockCheck.reason}) — page will return empty`);
+      if (hasFlareSolverr) {
+        try {
+          console.log(`  rebrowser blocked (${blockCheck.reason}), trying FlareSolverr...`);
+          const fs = await fetchViaFlareSolverr(url);
+          html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
+          method = "FlareSolverr";
+        } catch (e) {
+          console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
+        }
+      } else {
+        console.warn(`  rebrowser blocked (${blockCheck.reason}) — page will return empty`);
+      }
     }
   } else {
-    // Normal flow: HTTP → rebrowser (+ proxy if configured)
-    // Tier 0: HTTP first (cheapest, fastest)
+    // Normal flow: HTTP → rebrowser → FlareSolverr
     const httpStart = Date.now();
     const r = await httpFetch(url);
     httpTimeMs = Date.now() - httpStart;
@@ -598,18 +622,28 @@ export async function fetchPage(url: string, forceRender = false): Promise<Fetch
 
     if (blockCheck.blocked) {
       dumpDebug(url, html, statusCode, "http", r.responseHeaders);
-
-      // Tier 1: rebrowser-playwright (headed + CDP patches + optional proxy + CAPTCHA handling)
       console.log(`  HTTP blocked (${blockCheck.reason}), trying rebrowser...`);
+
       const pwStart = Date.now();
-      const rendered = await renderPage(url, proxyUrl);
+      const rendered = await renderPage(url, undefined);
       playwrightTimeMs = Date.now() - pwStart;
       html = rendered.html; statusCode = rendered.statusCode; finalUrl = rendered.finalUrl;
-      method = proxyUrl ? "rebrowser + proxy" : "rebrowser";
+      method = "rebrowser";
 
       if (isBlockedOrThin(html, statusCode).blocked) {
         dumpDebug(url, html, statusCode, "rebrowser", rendered.responseHeaders);
-        console.warn(`  rebrowser also blocked — page will return empty`);
+        if (hasFlareSolverr) {
+          try {
+            console.log(`  rebrowser blocked (${blockCheck.reason}), trying FlareSolverr...`);
+            const fs = await fetchViaFlareSolverr(url);
+            html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
+            method = "FlareSolverr";
+          } catch (e) {
+            console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
+          }
+        } else {
+          console.warn(`  rebrowser also blocked — page will return empty`);
+        }
       }
     }
   }
