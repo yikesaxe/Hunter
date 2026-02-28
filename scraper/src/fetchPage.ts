@@ -547,44 +547,33 @@ export interface FetchResult {
   method: string;
   httpTimeMs: number;
   playwrightTimeMs: number;
-  flaresolverrTimeMs: number;
-  firecrawlTimeMs: number;
   totalTimeMs: number;
 }
 
 export async function fetchPage(url: string, forceRender = false): Promise<FetchResult> {
   const startTime = Date.now();
   let html: string = "", statusCode: number = 0, finalUrl: string = url, method: string = "unknown";
-  let httpTimeMs = 0, playwrightTimeMs = 0, flaresolverrTimeMs = 0, firecrawlTimeMs = 0;
+  let httpTimeMs = 0, playwrightTimeMs = 0;
 
-  // Only use proxy for sites that need it -- some sites (like Leasebreak) work
-  // better without it because your home IP is already residential
+  // All known sites that benefit from a residential proxy when rendering via rebrowser.
+  // Leasebreak is included because crawlIndex now force-renders its index page.
   const PROXY_DOMAINS = new Set([
+    "leasebreak.com", "www.leasebreak.com",
     "streeteasy.com", "www.streeteasy.com",
     "zillow.com", "www.zillow.com",
     "renthop.com", "www.renthop.com",
     "apartments.com", "www.apartments.com",
   ]);
 
-  // Sites that always get blocked by HTTP/rebrowser → skip straight to FlareSolverr
-  const FLARESOLVERR_DOMAINS = new Set([
-    "leasebreak.com", "www.leasebreak.com",
-    "streeteasy.com", "www.streeteasy.com",
-    "renthop.com", "www.renthop.com",
-    "zillow.com", "www.zillow.com",
-  ]);
-
   const domain = getDomain(url);
   const hostname = new URL(url).hostname;
   const proxyUrl = PROXY_DOMAINS.has(hostname) ? (process.env.PROXY_URL || undefined) : undefined;
-  let skipToFlareSolverr = FLARESOLVERR_DOMAINS.has(hostname) && !!process.env.FLARESOLVERR_URL;
-  
+
   if (proxyUrl) console.log(`  [proxy] Will use proxy for ${domain}`);
-  else if (process.env.PROXY_URL) console.log(`  [no-proxy] Skipping proxy for ${domain} (works better without)`);
-  if (skipToFlareSolverr) console.log(`  [shortcut] Skipping HTTP/rebrowser for ${domain}, using FlareSolverr directly`);
+  else if (process.env.PROXY_URL) console.log(`  [no-proxy] Skipping proxy for ${domain}`);
 
   if (forceRender) {
-    // Skip HTTP, go straight to rebrowser
+    // Skip HTTP, go straight to rebrowser (+ proxy if configured)
     const pwStart = Date.now();
     const r = await renderPage(url, proxyUrl);
     playwrightTimeMs = Date.now() - pwStart;
@@ -594,109 +583,40 @@ export async function fetchPage(url: string, forceRender = false): Promise<Fetch
     const blockCheck = isBlockedOrThin(html, statusCode);
     if (blockCheck.blocked) {
       dumpDebug(url, html, statusCode, "rebrowser", r.responseHeaders);
-
-      if (process.env.FLARESOLVERR_URL) {
-        try {
-          console.log(`  rebrowser blocked (${blockCheck.reason}), trying FlareSolverr...`);
-          const fsStart = Date.now();
-          const fs = await fetchViaFlareSolverr(url);
-          flaresolverrTimeMs = Date.now() - fsStart;
-          html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
-          method = "FlareSolverr";
-        } catch (e) {
-          console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-      if (isBlockedOrThin(html, statusCode).blocked && process.env.FIRECRAWL_API_KEY) {
-        console.log(`  Still blocked, trying Firecrawl...`);
-        const fcStart = Date.now();
-        const fc = await fetchViaFirecrawl(url);
-        firecrawlTimeMs = Date.now() - fcStart;
-        html = fc.html; statusCode = fc.statusCode; finalUrl = fc.finalUrl;
-        method = "Firecrawl";
-      }
+      console.warn(`  rebrowser blocked (${blockCheck.reason}) — page will return empty`);
     }
   } else {
-    // Shortcut: For domains that always get blocked, skip straight to FlareSolverr
-    if (skipToFlareSolverr) {
-      try {
-        const fsStart = Date.now();
-        const fs = await fetchViaFlareSolverr(url);
-        flaresolverrTimeMs = Date.now() - fsStart;
-        return {
-          html: fs.html,
-          statusCode: fs.statusCode,
-          finalUrl: fs.finalUrl,
-          method: "FlareSolverr",
-          httpTimeMs: 0,
-          playwrightTimeMs: 0,
-          flaresolverrTimeMs,
-          firecrawlTimeMs: 0,
-          totalTimeMs: Date.now() - startTime,
-        };
-      } catch (e) {
-        console.warn(`  FlareSolverr failed, falling back to normal flow: ${e instanceof Error ? e.message : e}`);
-        // Continue to normal HTTP → rebrowser → FlareSolverr flow below
-      }
-    }
+    // Normal flow: HTTP → rebrowser (+ proxy if configured)
+    // Tier 0: HTTP first (cheapest, fastest)
+    const httpStart = Date.now();
+    const r = await httpFetch(url);
+    httpTimeMs = Date.now() - httpStart;
+    html = r.html; statusCode = r.statusCode; finalUrl = r.finalUrl;
+    method = "HTTP";
 
-    // Normal flow: HTTP → rebrowser → FlareSolverr (or if skipToFlareSolverr failed, use this as fallback)
-    {
-      // Tier 0: HTTP first (cheapest, fastest)
-      const httpStart = Date.now();
-      const r = await httpFetch(url);
-      httpTimeMs = Date.now() - httpStart;
-      html = r.html; statusCode = r.statusCode; finalUrl = r.finalUrl;
-      method = "HTTP";
+    const blockCheck = isBlockedOrThin(html, statusCode);
 
-      let blockCheck = isBlockedOrThin(html, statusCode);
+    if (blockCheck.blocked) {
+      dumpDebug(url, html, statusCode, "http", r.responseHeaders);
 
-      if (blockCheck.blocked) {
-        dumpDebug(url, html, statusCode, "http", r.responseHeaders);
+      // Tier 1: rebrowser-playwright (headed + CDP patches + optional proxy + CAPTCHA handling)
+      console.log(`  HTTP blocked (${blockCheck.reason}), trying rebrowser...`);
+      const pwStart = Date.now();
+      const rendered = await renderPage(url, proxyUrl);
+      playwrightTimeMs = Date.now() - pwStart;
+      html = rendered.html; statusCode = rendered.statusCode; finalUrl = rendered.finalUrl;
+      method = proxyUrl ? "rebrowser + proxy" : "rebrowser";
 
-        // Tier 1: rebrowser-playwright (headed + CDP patches + optional proxy + CAPTCHA handling)
-        console.log(`  HTTP blocked (${blockCheck.reason}), trying rebrowser...`);
-        const pwStart = Date.now();
-        const rendered = await renderPage(url, proxyUrl);
-        playwrightTimeMs = Date.now() - pwStart;
-        html = rendered.html; statusCode = rendered.statusCode; finalUrl = rendered.finalUrl;
-        method = proxyUrl ? "rebrowser + proxy" : "rebrowser";
-
-        blockCheck = isBlockedOrThin(html, statusCode);
-
-        if (blockCheck.blocked) {
-          dumpDebug(url, html, statusCode, "rebrowser", rendered.responseHeaders);
-
-          // Tier 2a: FlareSolverr (open-source Cloudflare bypass)
-          if (process.env.FLARESOLVERR_URL) {
-            try {
-              console.log(`  rebrowser blocked (${blockCheck.reason}), trying FlareSolverr...`);
-              const fsStart = Date.now();
-              const fs = await fetchViaFlareSolverr(url);
-              flaresolverrTimeMs = Date.now() - fsStart;
-              html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
-              method = "FlareSolverr";
-            } catch (e) {
-              console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
-            }
-          }
-          // Tier 2b: Firecrawl as last resort
-          if (isBlockedOrThin(html, statusCode).blocked && process.env.FIRECRAWL_API_KEY) {
-            console.log(`  Still blocked, trying Firecrawl...`);
-            const fcStart = Date.now();
-            const fc = await fetchViaFirecrawl(url);
-            firecrawlTimeMs = Date.now() - fcStart;
-            html = fc.html; statusCode = fc.statusCode; finalUrl = fc.finalUrl;
-            method = "Firecrawl";
-          }
-        }
+      if (isBlockedOrThin(html, statusCode).blocked) {
+        dumpDebug(url, html, statusCode, "rebrowser", rendered.responseHeaders);
+        console.warn(`  rebrowser also blocked — page will return empty`);
       }
     }
   }
 
   return {
     html, statusCode, finalUrl, method,
-    httpTimeMs, playwrightTimeMs, flaresolverrTimeMs, firecrawlTimeMs,
+    httpTimeMs, playwrightTimeMs,
     totalTimeMs: Date.now() - startTime,
   };
 }
