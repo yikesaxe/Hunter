@@ -12,6 +12,7 @@ export default async function ListingPage({
   const listing = await prisma.normalizedListing.findUnique({
     where: { id },
     include: {
+      analysis: true,
       canonicalUnit: {
         include: {
           postings: {
@@ -26,6 +27,10 @@ export default async function ListingPage({
   if (!listing) notFound();
 
   const siblingPostings = listing.canonicalUnit?.postings ?? [];
+  const analysis = listing.analysis;
+  const redFlags: string[] = Array.isArray(analysis?.redFlags) ? analysis!.redFlags as string[] : [];
+  const brokerSpeak: { phrase: string; translation: string }[] =
+    Array.isArray(analysis?.brokerSpeak) ? analysis!.brokerSpeak as { phrase: string; translation: string }[] : [];
 
   const photos: string[] = (() => {
     try { return JSON.parse(listing.photos); } catch { return []; }
@@ -186,6 +191,79 @@ export default async function ListingPage({
                 </svg>
               </TrackOutbound>
             </div>
+
+            {/* Hunter's Take — AI analysis panel */}
+            {analysis && (analysis.summary || redFlags.length > 0 || brokerSpeak.length > 0) && (
+              <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 shadow-sm">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-base">🔍</span>
+                  <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider">Hunter's Take</h3>
+                  {analysis.priceTier && (
+                    <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      analysis.priceTier === "below_market"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : analysis.priceTier === "above_market"
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-[var(--surface)] text-[var(--muted)]"
+                    }`}>
+                      {analysis.priceTier === "below_market"
+                        ? "Below market"
+                        : analysis.priceTier === "above_market"
+                        ? "Above market"
+                        : "At market"}
+                    </span>
+                  )}
+                </div>
+
+                {analysis.summary && (
+                  <p className="text-sm text-[var(--foreground)] leading-relaxed mb-4 italic">
+                    &ldquo;{analysis.summary}&rdquo;
+                  </p>
+                )}
+
+                {analysis.neighborhoodMedian != null && listing.rentGross != null && (
+                  <div className="mb-4 p-3 bg-[var(--surface)] rounded-lg text-xs text-[var(--muted)]">
+                    <span className="font-medium text-[var(--foreground)]">
+                      ${analysis.neighborhoodMedian.toLocaleString()}/mo
+                    </span>
+                    {" "}neighborhood median
+                    {" "}·{" "}
+                    {listing.rentGross > analysis.neighborhoodMedian
+                      ? <span className="text-rose-600">+{Math.round(((listing.rentGross - analysis.neighborhoodMedian) / analysis.neighborhoodMedian) * 100)}% above</span>
+                      : <span className="text-emerald-600">{Math.round(((listing.rentGross - analysis.neighborhoodMedian) / analysis.neighborhoodMedian) * 100)}% below</span>
+                    }
+                  </div>
+                )}
+
+                {redFlags.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-1.5">Red flags</p>
+                    <ul className="space-y-1">
+                      {redFlags.map((flag) => (
+                        <li key={flag} className="flex items-start gap-1.5 text-xs text-rose-700">
+                          <span className="mt-0.5">⚠</span>
+                          <span>{flag}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {brokerSpeak.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider mb-1.5">Broker speak decoded</p>
+                    <ul className="space-y-2">
+                      {brokerSpeak.map((bs) => (
+                        <li key={bs.phrase} className="text-xs">
+                          <span className="font-medium text-[var(--foreground)]">&ldquo;{bs.phrase}&rdquo;</span>
+                          <span className="text-[var(--muted)]"> → {bs.translation}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Broker info */}
             {(listing.brokerName || listing.brokerPhone || listing.brokerEmail) && (

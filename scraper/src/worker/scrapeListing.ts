@@ -3,7 +3,7 @@
 // detect removal, write RawListing + ChangeLog, update run stats.
 
 import { Worker, type Job } from "bullmq";
-import { connection, type ScrapeListingJobData, getGeocodeQueue } from "../queues.js";
+import { connection, type ScrapeListingJobData, getGeocodeQueue, getAnalyzeTextQueue } from "../queues.js";
 import { prisma, upsertNormalizedListing, markRemoved } from "../db.js";
 import { fetchPage } from "../fetchPage.js";
 import { parseListing, isChallengePage } from "../parseListing.js";
@@ -140,6 +140,15 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
     if (upsertResult.isNew && parsed.latitude == null && parsed.address) {
       try {
         await getGeocodeQueue().add("geocode-listing", { listingId: upsertResult.id });
+      } catch {
+        // non-blocking
+      }
+    }
+
+    // ── Enqueue text analysis for new or content-changed listings (best-effort)
+    if (upsertResult.isNew || upsertResult.contentChanged) {
+      try {
+        await getAnalyzeTextQueue().add("analyze-text", { listingId: upsertResult.id });
       } catch {
         // non-blocking
       }

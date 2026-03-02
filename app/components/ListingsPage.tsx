@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
+type ListingAnalysis = {
+  summary: string | null;
+  priceTier: string | null;
+  redFlags: unknown;
+};
+
 type Listing = {
   id: string;
   source: string;
@@ -20,6 +26,7 @@ type Listing = {
   matchReasons?: string[];
   siblingCount?: number;
   otherSources?: string[];
+  analysis?: ListingAnalysis | null;
 };
 
 const PLACEHOLDERS = [
@@ -232,18 +239,43 @@ function ListingCard({
         className="block p-4"
         onClick={() => trackEvent(listing.id, "click")}
       >
-        {listing.price != null && (
-          <p className="font-serif text-2xl font-semibold text-[var(--accent)] leading-none mb-2.5">
-            ${listing.price.toLocaleString()}
-            <span className="text-sm font-sans font-normal text-[var(--muted-light)] ml-1">/mo</span>
-          </p>
-        )}
+        <div className="flex items-start justify-between gap-2 mb-2.5">
+          {listing.price != null ? (
+            <p className="font-serif text-2xl font-semibold text-[var(--accent)] leading-none">
+              ${listing.price.toLocaleString()}
+              <span className="text-sm font-sans font-normal text-[var(--muted-light)] ml-1">/mo</span>
+            </p>
+          ) : <span />}
+          {listing.analysis?.priceTier && (
+            <span
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                listing.analysis.priceTier === "below_market"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : listing.analysis.priceTier === "above_market"
+                  ? "bg-rose-100 text-rose-700"
+                  : "bg-[var(--surface)] text-[var(--muted)]"
+              }`}
+            >
+              {listing.analysis.priceTier === "below_market"
+                ? "Below market"
+                : listing.analysis.priceTier === "above_market"
+                ? "Above market"
+                : "At market"}
+            </span>
+          )}
+        </div>
 
         <p className="text-sm font-medium text-[var(--foreground)] leading-snug line-clamp-1 mb-1">
           {listing.title ?? listing.address ?? "—"}
         </p>
         {listing.title && listing.address && (
           <p className="text-xs text-[var(--muted)] line-clamp-1 mb-2">{listing.address}</p>
+        )}
+
+        {listing.analysis?.summary && (
+          <p className="text-xs text-[var(--muted)] italic line-clamp-2 mb-2 leading-relaxed">
+            {listing.analysis.summary}
+          </p>
         )}
 
         {(listing.neighborhood || listing.borough) && (
@@ -260,6 +292,20 @@ function ListingCard({
             )}
           </div>
         )}
+
+        {/* Red flags from AI analysis */}
+        {(() => {
+          const flags = Array.isArray(listing.analysis?.redFlags) ? listing.analysis!.redFlags as string[] : [];
+          return flags.length > 0 ? (
+            <div className="flex flex-wrap gap-1 mb-2">
+              {flags.slice(0, 2).map((flag) => (
+                <span key={flag} className="text-[10px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded-full border border-rose-100">
+                  ⚠ {flag.length > 40 ? flag.slice(0, 38) + "…" : flag}
+                </span>
+              ))}
+            </div>
+          ) : null;
+        })()}
 
         {(listing.beds != null || listing.baths != null || listing.sqft != null) && (
           <div className="flex items-center gap-3 text-xs text-[var(--muted)] border-t border-[var(--border)] pt-3">

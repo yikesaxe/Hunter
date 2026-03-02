@@ -44,6 +44,10 @@ export interface GeocodeJobData {
   listingId: string;
 }
 
+export interface AnalyzeTextJobData {
+  listingId: string;
+}
+
 const defaultJobOptions = {
   attempts: 3,
   backoff: { type: "exponential" as const, delay: 2000 },
@@ -54,6 +58,7 @@ const defaultJobOptions = {
 let _crawlQueue: Queue<CrawlIndexJobData> | null = null;
 let _scrapeQueue: Queue<ScrapeListingJobData> | null = null;
 let _geocodeQueue: Queue<GeocodeJobData> | null = null;
+let _analyzeTextQueue: Queue<AnalyzeTextJobData> | null = null;
 
 export function getCrawlQueue(): Queue<CrawlIndexJobData> {
   if (!_crawlQueue) {
@@ -90,13 +95,30 @@ export function getGeocodeQueue(): Queue<GeocodeJobData> {
   return _geocodeQueue;
 }
 
+export function getAnalyzeTextQueue(): Queue<AnalyzeTextJobData> {
+  if (!_analyzeTextQueue) {
+    _analyzeTextQueue = new Queue<AnalyzeTextJobData>("analyze-text", {
+      connection,
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 10000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return _analyzeTextQueue;
+}
+
 export async function closeQueues(): Promise<void> {
   await _crawlQueue?.close();
   await _scrapeQueue?.close();
   await _geocodeQueue?.close();
+  await _analyzeTextQueue?.close();
   _crawlQueue = null;
   _scrapeQueue = null;
   _geocodeQueue = null;
+  _analyzeTextQueue = null;
 }
 
 /**

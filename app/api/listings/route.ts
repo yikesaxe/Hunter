@@ -165,6 +165,7 @@ export async function GET(req: NextRequest) {
         where,
         orderBy: { lastScrapedAt: "desc" },
         take: limit,
+        include: { analysis: { select: { summary: true, priceTier: true, redFlags: true } } },
       }),
       prisma.normalizedListing.count({ where }),
     ]);
@@ -191,7 +192,12 @@ export async function GET(req: NextRequest) {
     const payload = listings.map((l) => {
       const allSources = l.canonicalUnitId ? (siblingMap.get(l.canonicalUnitId) ?? []) : [];
       const otherSources = [...new Set(allSources.filter((s) => s !== l.source))];
-      return { ...l, siblingCount: otherSources.length, otherSources };
+      return {
+        ...l,
+        siblingCount: otherSources.length,
+        otherSources,
+        analysis: l.analysis ?? null,
+      };
     });
 
     return NextResponse.json({ listings: payload, total });

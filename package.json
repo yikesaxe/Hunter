@@ -16,11 +16,13 @@
     "retry": "tsx scraper/src/retryFailed.ts",
     "backfill:canonicals": "tsx scripts/backfillCanonicals.ts",
     "backfill:geocode": "tsx scripts/backfillGeocode.ts",
+    "backfill:analyze-text": "tsx scripts/backfillAnalyzeText.ts",
     "seed:subways": "tsx scripts/seedSubwayStations.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@fastify/static": "^8.0.2",
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
