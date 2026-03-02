@@ -97,7 +97,12 @@ export async function syncCrawlJobsForDevice(deviceId: string): Promise<string[]
 const REGISTRY_URLS: Partial<Record<Source, string[]>> = {
   streeteasy: ["https://streeteasy.com/for-rent/manhattan"],
   renthop: ["https://www.renthop.com/search/nyc?min_price=1000&max_price=20000"],
-  leasebreak: ["https://leasebreak.com/listings"],
+  leasebreak: [
+    "https://leasebreak.com/listings/Manhattan",
+    "https://leasebreak.com/listings/Brooklyn",
+    "https://leasebreak.com/listings/Queens",
+    "https://leasebreak.com/listings/Bronx",
+  ],
 };
 
 /**
