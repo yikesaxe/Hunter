@@ -1,6 +1,6 @@
 // Quick script to check if Redis is connected and jobs are in the queue
 import "dotenv/config";
-import { getCrawlQueue, getScrapeQueue } from "./queues.js";
+import { getCrawlQueue, getScrapeQueue, getGeocodeQueue, getAnalyzeTextQueue } from "./queues.js";
 
 async function checkQueue(name: string, queue: any) {
   const waiting = await queue.getWaiting();
@@ -57,6 +57,8 @@ async function check() {
 
     await checkQueue("Crawl-Index", crawlQueue);
     await checkQueue("Scrape-Listing", scrapeQueue);
+    await checkQueue("Geocode-Listing", getGeocodeQueue());
+    await checkQueue("Analyze-Text", getAnalyzeTextQueue());
 
     console.log("\n" + "=".repeat(50));
     console.log("💡 Tip: Run 'npm run retry' to retry failed jobs");
