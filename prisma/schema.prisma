@@ -119,6 +119,7 @@ model NormalizedListing {
   rawListings RawListing[]
   changeLogs  ChangeLog[]
   events      Event[]
+  analysis    ListingAnalysis?
 
   @@unique([source, sourceListingId])
   @@index([sourceUrl])
@@ -162,6 +163,63 @@ model ChangeLog {
 
   @@index([normalizedListingId, changedAt])
   @@index([canonicalUnitId, changedAt])
+}
+
+// ============================================================
+// AI ANALYSIS LAYER
+// ============================================================
+
+/// AI-generated analysis for a listing. One record per NormalizedListing.
+/// Each analysis type is independently tracked via *AnalyzedAt + input hash.
+/// All fields are nullable — populated progressively as each worker runs.
+model ListingAnalysis {
+  id                  String   @id @default(uuid())
+  normalizedListingId String   @unique
+  normalizedListing   NormalizedListing @relation(fields: [normalizedListingId], references: [id], onDelete: Cascade)
+
+  // ── Text analysis (Claude Haiku)
+  summary    String? // 1-2 honest sentences for users
+  priceTier  String? // "below_market" | "at_market" | "above_market"
+  redFlags   Json?   // string[]
+  brokerSpeak Json?  // { phrase: string; translation: string }[]
+  textHash   String? // NormalizedListing.contentHash at analysis time (skip if unchanged)
+
+  // ── Photo analysis (Claude Haiku Vision)
+  photoFlags        Json? // { hasAiImages, hasFisheyeImages, missingRooms, perPhoto[] }
+  overallPhotoScore Int?  // 0–10
+  photoHash         String? // SHA-256 of photos JSON at analysis time
+
+  // ── Neighborhood (NYC Open Data + OSM Overpass — requires lat/lon)
+  subwayStations  Json? // { name, lines, walkMinutes }[]
+  complaints311   Json? // { type, count, period }[]
+  nearbyAmenities Json? // { groceries: string[], parks: string[] }
+
+  // ── Price intelligence (pure DB — no external API)
+  neighborhoodMedian Int? // median rentGross same beds+neighborhood last 60d
+  pricePercentile    Int? // 0–100 rank vs comparable active listings
+
+  // ── Per-type staleness timestamps
+  textAnalyzedAt         DateTime?
+  photoAnalyzedAt        DateTime?
+  neighborhoodAnalyzedAt DateTime?
+  priceAnalyzedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([textAnalyzedAt])
+  @@index([neighborhoodAnalyzedAt])
+}
+
+/// NYC subway station, seeded from MTA / NYC Open Data. Used for walk-time calculation.
+model SubwayStation {
+  id        String @id // MTA stop_id (e.g. "101")
+  name      String
+  lines     Json   // string[] e.g. ["A","C","E"]
+  latitude  Float
+  longitude Float
+
+  @@index([latitude, longitude])
 }
 
 // ============================================================

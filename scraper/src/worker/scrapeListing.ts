@@ -3,7 +3,7 @@
 // detect removal, write RawListing + ChangeLog, update run stats.
 
 import { Worker, type Job } from "bullmq";
-import { connection, type ScrapeListingJobData } from "../queues.js";
+import { connection, type ScrapeListingJobData, getGeocodeQueue } from "../queues.js";
 import { prisma, upsertNormalizedListing, markRemoved } from "../db.js";
 import { fetchPage } from "../fetchPage.js";
 import { parseListing, isChallengePage } from "../parseListing.js";
@@ -135,6 +135,15 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
     const preview = parsed.address || url;
     const tag = upsertResult.isNew ? "new" : upsertResult.contentChanged ? "updated" : "unchanged";
     console.log(`[scrape-listing] [${tag}] ${preview}`);
+
+    // ── Enqueue geocoding for new listings without coordinates (best-effort)
+    if (upsertResult.isNew && parsed.latitude == null && parsed.address) {
+      try {
+        await getGeocodeQueue().add("geocode-listing", { listingId: upsertResult.id });
+      } catch {
+        // non-blocking
+      }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
 

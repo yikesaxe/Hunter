@@ -40,6 +40,10 @@ export interface ScrapeListingJobData {
   crawlJobId?: string;
 }
 
+export interface GeocodeJobData {
+  listingId: string;
+}
+
 const defaultJobOptions = {
   attempts: 3,
   backoff: { type: "exponential" as const, delay: 2000 },
@@ -49,6 +53,7 @@ const defaultJobOptions = {
 
 let _crawlQueue: Queue<CrawlIndexJobData> | null = null;
 let _scrapeQueue: Queue<ScrapeListingJobData> | null = null;
+let _geocodeQueue: Queue<GeocodeJobData> | null = null;
 
 export function getCrawlQueue(): Queue<CrawlIndexJobData> {
   if (!_crawlQueue) {
@@ -70,11 +75,28 @@ export function getScrapeQueue(): Queue<ScrapeListingJobData> {
   return _scrapeQueue;
 }
 
+export function getGeocodeQueue(): Queue<GeocodeJobData> {
+  if (!_geocodeQueue) {
+    _geocodeQueue = new Queue<GeocodeJobData>("geocode-listing", {
+      connection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return _geocodeQueue;
+}
+
 export async function closeQueues(): Promise<void> {
   await _crawlQueue?.close();
   await _scrapeQueue?.close();
+  await _geocodeQueue?.close();
   _crawlQueue = null;
   _scrapeQueue = null;
+  _geocodeQueue = null;
 }
 
 /**
