@@ -9,8 +9,23 @@ export default async function ListingPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const listing = await prisma.normalizedListing.findUnique({ where: { id } });
+  const listing = await prisma.normalizedListing.findUnique({
+    where: { id },
+    include: {
+      canonicalUnit: {
+        include: {
+          postings: {
+            where: { id: { not: id }, status: "active" },
+            select: { id: true, source: true, sourceUrl: true, rentGross: true },
+            orderBy: { rentGross: "asc" },
+          },
+        },
+      },
+    },
+  });
   if (!listing) notFound();
+
+  const siblingPostings = listing.canonicalUnit?.postings ?? [];
 
   const photos: string[] = (() => {
     try { return JSON.parse(listing.photos); } catch { return []; }
@@ -189,6 +204,28 @@ export default async function ListingPage({
                     {listing.brokerEmail}
                   </a>
                 )}
+              </div>
+            )}
+
+            {/* Also listed on — cross-source dedup */}
+            {siblingPostings.length > 0 && (
+              <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-5 shadow-sm">
+                <h3 className="text-xs font-semibold text-[var(--muted)] uppercase tracking-wider mb-3">Also listed on</h3>
+                <ul className="space-y-2">
+                  {siblingPostings.map((sibling) => (
+                    <li key={sibling.id}>
+                      <a
+                        href={`/listings/${sibling.id}`}
+                        className="flex items-center justify-between text-sm hover:text-[var(--accent)] transition-colors"
+                      >
+                        <span className="font-medium capitalize">{sibling.source}</span>
+                        {sibling.rentGross != null && (
+                          <span className="text-[var(--muted)]">${sibling.rentGross.toLocaleString()}/mo</span>
+                        )}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

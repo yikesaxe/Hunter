@@ -11,6 +11,7 @@ import { createHash, randomUUID } from "crypto";
 import { PrismaClient } from "../../node_modules/.prisma/client/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { ListingData } from "./parseListing.js";
+import { findOrCreateCanonical } from "./canonicalize.js";
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
@@ -322,6 +323,34 @@ export async function upsertNormalizedListing(
   const canonicalUnitId = existing?.canonicalUnitId ?? null;
   if (canonicalUnitId) {
     await updateCanonicalUnitCount(canonicalUnitId);
+  }
+
+  // ── Cross-source dedup: attempt to find or create a CanonicalUnit for new/unlinked listings
+  if (isNew || !existing?.canonicalUnitId) {
+    try {
+      const fresh = await prisma.normalizedListing.findUnique({
+        where: { id: listingId },
+        select: {
+          id: true, source: true, address: true, unit: true,
+          latitude: true, longitude: true, beds: true, baths: true,
+          neighborhood: true, borough: true, zip: true, sqft: true,
+          canonicalUnitId: true,
+        },
+      });
+      if (fresh && !fresh.canonicalUnitId) {
+        const newCanonicalId = await findOrCreateCanonical(prisma, fresh);
+        if (newCanonicalId) {
+          await prisma.normalizedListing.update({
+            where: { id: listingId },
+            data: { canonicalUnitId: newCanonicalId },
+          });
+          await updateCanonicalUnitCount(newCanonicalId);
+        }
+      }
+    } catch (err) {
+      // Dedup is best-effort — never block a successful scrape
+      console.warn(`[canonicalize] dedup failed for ${listingId}:`, err);
+    }
   }
 
   return { id: listingId, isNew, contentChanged };

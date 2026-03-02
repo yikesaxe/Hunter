@@ -168,7 +168,33 @@ export async function GET(req: NextRequest) {
       }),
       prisma.normalizedListing.count({ where }),
     ]);
-    return NextResponse.json({ listings, total });
+
+    // Batch-fetch sibling postings for cross-source dedup badges
+    const canonicalIds = [
+      ...new Set(
+        listings.map((l) => l.canonicalUnitId).filter((id): id is string => id != null)
+      ),
+    ];
+    const siblingMap = new Map<string, string[]>(); // canonicalUnitId → source[]
+    if (canonicalIds.length > 0) {
+      const siblings = await prisma.normalizedListing.findMany({
+        where: { canonicalUnitId: { in: canonicalIds }, status: "active" },
+        select: { canonicalUnitId: true, source: true },
+      });
+      for (const s of siblings) {
+        if (!s.canonicalUnitId) continue;
+        if (!siblingMap.has(s.canonicalUnitId)) siblingMap.set(s.canonicalUnitId, []);
+        siblingMap.get(s.canonicalUnitId)!.push(s.source);
+      }
+    }
+
+    const payload = listings.map((l) => {
+      const allSources = l.canonicalUnitId ? (siblingMap.get(l.canonicalUnitId) ?? []) : [];
+      const otherSources = [...new Set(allSources.filter((s) => s !== l.source))];
+      return { ...l, siblingCount: otherSources.length, otherSources };
+    });
+
+    return NextResponse.json({ listings: payload, total });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Failed to fetch listings" }, { status: 500 });

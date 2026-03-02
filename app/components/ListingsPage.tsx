@@ -18,6 +18,8 @@ type Listing = {
   lastScrapedAt: string;
   matchScore?: number;
   matchReasons?: string[];
+  siblingCount?: number;
+  otherSources?: string[];
 };
 
 const PLACEHOLDERS = [
@@ -154,9 +156,19 @@ function ListingCard({
         )}
 
         {/* Source badge — top right */}
-        <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
-          {listing.source}
-        </span>
+        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+          {(listing.siblingCount ?? 0) > 0 && (
+            <span
+              title={`Also on ${listing.otherSources?.join(", ")}`}
+              className="bg-[var(--accent)]/90 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-1 rounded-full shadow-sm"
+            >
+              +{listing.siblingCount}
+            </span>
+          )}
+          <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
+            {listing.source}
+          </span>
+        </div>
 
         {/* Photo counter — top left, only when multiple photos */}
         {photos.length > 1 && (
