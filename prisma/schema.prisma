@@ -84,6 +84,9 @@ model NormalizedListing {
   amenities   String  @default("[]") // JSON string[]
   photos      String  @default("[]") // JSON string[]
 
+  // Scraped extras (transit, schools, pet policy, laundry — source-specific)
+  scrapedExtras Json? // { transit?, schools?, petPolicy?, laundry?, ... }
+
   // Broker contact
   brokerName  String?
   brokerPhone String?

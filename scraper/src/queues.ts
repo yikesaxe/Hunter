@@ -48,6 +48,10 @@ export interface AnalyzeTextJobData {
   listingId: string;
 }
 
+export interface AnalyzePhotosJobData {
+  listingId: string;
+}
+
 const defaultJobOptions = {
   attempts: 3,
   backoff: { type: "exponential" as const, delay: 2000 },
@@ -59,6 +63,7 @@ let _crawlQueue: Queue<CrawlIndexJobData> | null = null;
 let _scrapeQueue: Queue<ScrapeListingJobData> | null = null;
 let _geocodeQueue: Queue<GeocodeJobData> | null = null;
 let _analyzeTextQueue: Queue<AnalyzeTextJobData> | null = null;
+let _analyzePhotosQueue: Queue<AnalyzePhotosJobData> | null = null;
 
 export function getCrawlQueue(): Queue<CrawlIndexJobData> {
   if (!_crawlQueue) {
@@ -110,15 +115,32 @@ export function getAnalyzeTextQueue(): Queue<AnalyzeTextJobData> {
   return _analyzeTextQueue;
 }
 
+export function getAnalyzePhotosQueue(): Queue<AnalyzePhotosJobData> {
+  if (!_analyzePhotosQueue) {
+    _analyzePhotosQueue = new Queue<AnalyzePhotosJobData>("analyze-photos", {
+      connection,
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: "exponential", delay: 15000 },
+        removeOnComplete: { count: 500 },
+        removeOnFail: { count: 500 },
+      },
+    });
+  }
+  return _analyzePhotosQueue;
+}
+
 export async function closeQueues(): Promise<void> {
   await _crawlQueue?.close();
   await _scrapeQueue?.close();
   await _geocodeQueue?.close();
   await _analyzeTextQueue?.close();
+  await _analyzePhotosQueue?.close();
   _crawlQueue = null;
   _scrapeQueue = null;
   _geocodeQueue = null;
   _analyzeTextQueue = null;
+  _analyzePhotosQueue = null;
 }
 
 /**

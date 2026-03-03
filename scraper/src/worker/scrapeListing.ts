@@ -3,10 +3,11 @@
 // detect removal, write RawListing + ChangeLog, update run stats.
 
 import { Worker, type Job } from "bullmq";
-import { connection, type ScrapeListingJobData, getGeocodeQueue, getAnalyzeTextQueue } from "../queues.js";
+import { connection, type ScrapeListingJobData, getGeocodeQueue, getAnalyzeTextQueue, getAnalyzePhotosQueue } from "../queues.js";
 import { prisma, upsertNormalizedListing, markRemoved } from "../db.js";
 import { fetchPage } from "../fetchPage.js";
 import { parseListing, isChallengePage } from "../parseListing.js";
+import { enrichListingFromText } from "../enrichListing.js";
 
 /** HTTP status codes that mean the listing is definitively gone. */
 const REMOVAL_STATUS_CODES = new Set([404, 410]);
@@ -120,6 +121,21 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
       return;
     }
 
+    // ── AI enrichment: extract amenities, policies, concessions, transit etc.
+    //    from the full visible page text — catches everything CSS selectors miss.
+    try {
+      const enriched = await enrichListingFromText(result.html);
+      // Use Claude's description if ours is short (meta-tag fallback) or absent
+      if (enriched.description && enriched.description.length > (parsed.description?.length ?? 0)) {
+        parsed.description = enriched.description;
+      }
+      // Merge extras — CSS-extracted values (transit/schools from selectors) take priority
+      // so we don't overwrite anything the structured parser already got right
+      parsed.extras = { ...enriched.extras, ...parsed.extras };
+    } catch {
+      // enrichment is best-effort — never block a scrape
+    }
+
     // ── Successful parse: upsert + archive raw scrape
     const upsertResult = await upsertNormalizedListing(parsed, {
       discoveredByCrawlJobId: crawlJobId,
@@ -145,13 +161,18 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
       }
     }
 
-    // ── Enqueue text analysis for new or content-changed listings (best-effort)
-    if (upsertResult.isNew || upsertResult.contentChanged) {
+    // ── Text analysis disabled — focusing on scraping improvements
+    // if (upsertResult.isNew || upsertResult.contentChanged) {
+    //   try {
+    //     await getAnalyzeTextQueue().add("analyze-text", { listingId: upsertResult.id });
+    //   } catch { /* non-blocking */ }
+    // }
+
+    // ── Photo analysis: enqueue when listing has photos and is new or changed
+    if ((upsertResult.isNew || upsertResult.contentChanged) && parsed.photos.length > 0) {
       try {
-        await getAnalyzeTextQueue().add("analyze-text", { listingId: upsertResult.id });
-      } catch {
-        // non-blocking
-      }
+        await getAnalyzePhotosQueue().add("analyze-photos", { listingId: upsertResult.id });
+      } catch { /* non-blocking */ }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

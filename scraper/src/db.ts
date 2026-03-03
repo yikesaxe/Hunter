@@ -35,6 +35,7 @@ type HashableFields = {
   neighborhood: string | null;
   description: string | null;
   amenities: string[]; // sorted before hashing
+  extras: Record<string, unknown>;
 };
 
 function stableStringify(v: unknown): string {
@@ -68,8 +69,9 @@ function hashableFromListingData(d: ListingData): HashableFields {
     address: d.address,
     unit: null,
     neighborhood: d.neighborhood,
-    description: d.description ? d.description.slice(0, 500) : null,
+    description: d.description ?? null,
     amenities: d.features ?? [],
+    extras: d.extras ?? {},
   };
 }
 
@@ -210,6 +212,10 @@ export async function upsertNormalizedListing(
     if (!jobExists) discoveredByCrawlJobId = null;
   }
 
+  const scrapedExtras = data.extras && Object.keys(data.extras).length > 0
+    ? data.extras as object
+    : undefined;
+
   // Fields written on every scrape (discoveredByCrawlJobId only set at create time)
   const updateData = {
     sourceUrl: data.url,
@@ -227,6 +233,8 @@ export async function upsertNormalizedListing(
     description: data.description,
     amenities,
     photos,
+    brokerName: data.brokerName,
+    scrapedExtras,
     contentHash,
     lastSeenAt: now,
     lastScrapedAt: now,

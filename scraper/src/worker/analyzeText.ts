@@ -71,19 +71,26 @@ async function runClaudeAnalysis(listing: {
   rentGross: number | null;
   beds: number | null;
   baths: number | null;
+  sqft: number | null;
   neighborhood: string | null;
   borough: string | null;
   description: string | null;
   amenities: string;
   address: string | null;
+  scrapedExtras: unknown;
 }, priceCtx: PriceContext | null): Promise<AnalysisResult | null> {
   const amenities: string[] = (() => {
     try { return JSON.parse(listing.amenities); } catch { return []; }
   })();
 
+  const extras = (listing.scrapedExtras && typeof listing.scrapedExtras === "object")
+    ? listing.scrapedExtras as Record<string, unknown>
+    : {};
+
   const location = [listing.neighborhood, listing.borough].filter(Boolean).join(", ");
   const bedroomLabel = listing.beds === 0 ? "Studio" : listing.beds != null ? `${listing.beds}BR` : "";
   const priceLabel = listing.rentGross != null ? `$${listing.rentGross.toLocaleString()}/mo` : "price unknown";
+  const sqftLabel = listing.sqft != null ? `${listing.sqft} sqft` : null;
 
   let priceContext = "";
   if (priceCtx && listing.rentGross) {
@@ -92,13 +99,46 @@ async function runClaudeAnalysis(listing: {
     priceContext = `\nNeighborhood median for ${bedroomLabel} in ${location}: $${priceCtx.median.toLocaleString()}/mo (this listing is ${Math.abs(pct)}% ${dir} market, n=${priceCtx.sampleSize} comps)`;
   }
 
+  // Build combined amenity list from CSS-extracted + AI-enriched sources
+  const homeFeatures = Array.isArray(extras.homeFeatures) ? extras.homeFeatures as string[] : [];
+  const buildingAmenities = Array.isArray(extras.buildingAmenities) ? extras.buildingAmenities as string[] : [];
+  const allAmenities = [...new Set([...amenities, ...homeFeatures, ...buildingAmenities])];
+
+  // Policies
+  const policies = extras.policies as Record<string, string> | undefined;
+  const policiesLine = policies
+    ? "\n- Policies: " + Object.entries(policies).map(([k, v]) => `${k}: ${v}`).join(", ")
+    : "";
+
+  // Concessions (free months, net effective rent)
+  const concessions = extras.concessions as { freeMonths?: number; netEffectiveRent?: number; leaseTerm?: string } | undefined;
+  let concessionsLine = "";
+  if (concessions) {
+    const parts: string[] = [];
+    if (concessions.freeMonths) parts.push(`${concessions.freeMonths} months free`);
+    if (concessions.netEffectiveRent) parts.push(`net effective $${concessions.netEffectiveRent.toLocaleString()}/mo`);
+    if (concessions.leaseTerm) parts.push(concessions.leaseTerm);
+    if (parts.length) concessionsLine = `\n- Concessions: ${parts.join(", ")}`;
+  }
+
+  // Transit
+  let transitLine = "";
+  const transitSrc = Array.isArray(extras.transit) ? extras.transit as { name: string }[] : [];
+  if (transitSrc.length > 0) {
+    transitLine = `\n- Nearby transit: ${transitSrc.slice(0, 4).map((t) => t.name).join("; ")}`;
+  }
+
+  // Availability / days on market
+  const availLine = extras.availability ? `\n- Availability: ${extras.availability}` : "";
+  const domLine = extras.daysOnMarket ? `\n- Days on market: ${extras.daysOnMarket}` : "";
+
   const prompt = `Analyze this NYC apartment listing and return a JSON object. Be direct, honest, and useful — like a friend who knows NYC real estate.
 
 Listing:
-- ${bedroomLabel} in ${location || "NYC"} — ${priceLabel}${priceContext}
+- ${bedroomLabel} in ${location || "NYC"} — ${priceLabel}${sqftLabel ? ` (${sqftLabel})` : ""}${priceContext}
 - Address: ${listing.address ?? "not provided"}
-- Amenities: ${amenities.length > 0 ? amenities.slice(0, 15).join(", ") : "none listed"}
-- Description: ${listing.description ? listing.description.slice(0, 600) : "none"}
+- Amenities: ${allAmenities.length > 0 ? allAmenities.slice(0, 30).join(", ") : "none listed"}${policiesLine}${concessionsLine}${transitLine}${availLine}${domLine}
+- Description: ${listing.description ? listing.description.slice(0, 1200) : "none"}
 
 Return ONLY this JSON (no markdown, no explanation):
 {
@@ -153,11 +193,13 @@ async function processAnalyzeText(job: Job<AnalyzeTextJobData>): Promise<void> {
       rentGross: true,
       beds: true,
       baths: true,
+      sqft: true,
       neighborhood: true,
       borough: true,
       description: true,
       amenities: true,
       address: true,
+      scrapedExtras: true,
       status: true,
       analysis: { select: { textHash: true } },
     },

@@ -24,6 +24,9 @@ export interface ListingData {
   source: string;
   url: string;
   extractedBy: string[];
+  brokerName: string | null;
+  /** Transit, schools, pet policy, laundry and other site-specific extras. */
+  extras: Record<string, unknown>;
 }
 
 /** Cloudflare/challenge pages often parse to this; treat as blocked, not a real listing. */
@@ -394,6 +397,64 @@ function extractFromStreetEasy($: cheerio.CheerioAPI, url: string, data: Listing
     if (n) { data.neighborhood = n; found = true; }
   }
 
+  // Description — try testid selectors then fallback containers
+  if (!data.description) {
+    const descSelectors = [
+      '[data-testid="description"] p',
+      '[data-testid="building-description"]',
+      'section[aria-label="Description"]',
+      ".description-full",
+      "[class*='Description'] p",
+    ];
+    for (const sel of descSelectors) {
+      const el = $(sel).first();
+      if (el.length) {
+        const text = el.text().trim();
+        if (text.length > 50) { data.description = text; found = true; break; }
+      }
+    }
+  }
+
+  // Amenities — try testid selectors then class-based.
+  // StreetEasy (FlareSolverr response): home features in home-features-section, building in building-amenities-section.
+  if (data.features.length === 0) {
+    // StreetEasy-specific: pull home features first, then building amenities.
+    // Each li has a primary <p> label and optional sub-label <p> (e.g. "View" + "City").
+    // Use li > p:first-child to get only the primary label and skip sub-labels.
+    const homeFeatureSel = '[data-testid="home-features-section"] li > p:first-child';
+    const buildingAmenitySel = '[data-testid="building-amenities-section"] li > p:first-child';
+    const SKIP_PHRASES = /^no info on\b|^services and facilities$|^wellness and recreation$|^shared outdoor space$/i;
+
+    [homeFeatureSel, buildingAmenitySel].forEach(sel => {
+      $(sel).each((_, el) => {
+        const text = $(el).text().replace(/<!--.*?-->/g, "").trim();
+        if (text.length > 1 && text.length < 80 && !SKIP_PHRASES.test(text)) {
+          data.features.push(text);
+        }
+      });
+    });
+
+    // Fallback to generic selectors
+    if (data.features.length === 0) {
+      const amenitySelectors = [
+        '[data-testid="amenities"] li',
+        '[class*="AmenitiesGroup"] li',
+        ".building-amenities li",
+        ".unit-amenities li",
+        "[class*='amenities'] li",
+      ];
+      for (const sel of amenitySelectors) {
+        $(sel).each((_, el) => {
+          const text = $(el).text().trim();
+          if (text.length > 0 && text.length < 100) data.features.push(text);
+        });
+        if (data.features.length > 0) break;
+      }
+    }
+
+    if (data.features.length > 0) found = true;
+  }
+
   // Photos
   if (data.photos.length === 0) {
     $("img").each((_, el) => {
@@ -510,6 +571,159 @@ function extractFromRentHop($: cheerio.CheerioAPI, url: string, data: ListingDat
   if (!data.price) {
     const p = $(".listing-price, .price, [class*='price']").first().text();
     if (p) { data.price = parseMoney(p); if (data.price) found = true; }
+  }
+
+  // Beds / baths — try multiple selector patterns
+  if (!data.beds) {
+    // Try icon-based layout
+    const bedText = $(".icon-bed").closest("div, li, span").text().trim()
+      || $("[class*='bed']").first().text().trim();
+    if (bedText) {
+      const m = bedText.match(/(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|BR)\b/i);
+      if (m) { const v = saneBeds(parseFloat(m[1])); if (v !== null) { data.beds = v; found = true; } }
+      if (!data.beds && /\bstudio\b/i.test(bedText)) { data.beds = 0; found = true; }
+    }
+    // Try table rows with "Bedroom" label
+    if (!data.beds) {
+      $("tr").each((_, el) => {
+        const cells = $(el).find("td, th");
+        if (cells.length >= 2) {
+          const label = cells.first().text().trim().toLowerCase();
+          const val = cells.eq(1).text().trim();
+          if (label.includes("bedroom")) {
+            const v = /studio/i.test(val) ? 0 : saneBeds(parseFloat(val));
+            if (v !== null) { data.beds = v; found = true; }
+          }
+        }
+      });
+    }
+  }
+  if (!data.baths) {
+    const bathText = $(".icon-bath").closest("div, li, span").text().trim()
+      || $("[class*='bath']").first().text().trim();
+    if (bathText) {
+      const m = bathText.match(/(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|BA)\b/i);
+      if (m) { const v = parseFloat(m[1]); if (!isNaN(v) && v >= 0 && v <= 10) { data.baths = v; found = true; } }
+    }
+    if (!data.baths) {
+      $("tr").each((_, el) => {
+        const cells = $(el).find("td, th");
+        if (cells.length >= 2) {
+          const label = cells.first().text().trim().toLowerCase();
+          if (label.includes("bathroom")) {
+            const v = parseFloat(cells.eq(1).text().trim());
+            if (!isNaN(v) && v >= 0 && v <= 10) { data.baths = v; found = true; }
+          }
+        }
+      });
+    }
+  }
+
+  // Description — try multiple containers
+  if (!data.description) {
+    const descSelectors = [
+      ".listing-description p",
+      ".description-full",
+      "section.description",
+      "div.description",
+      "[class*='description'] p",
+    ];
+    for (const sel of descSelectors) {
+      const el = $(sel).first();
+      if (el.length) {
+        const text = el.text().trim();
+        if (text.length > 50) { data.description = text; found = true; break; }
+      }
+    }
+    // Fallback: any <p> block with >100 chars after a "Description" heading
+    if (!data.description) {
+      let foundHeading = false;
+      $("h2, h3, h4").each((_, el) => {
+        if ($(el).text().trim().toLowerCase() === "description") foundHeading = true;
+      });
+      if (foundHeading) {
+        $("p").each((_, el) => {
+          if (!data.description) {
+            const text = $(el).text().trim();
+            if (text.length > 100) { data.description = text; found = true; }
+          }
+        });
+      }
+    }
+  }
+
+  // Amenities — try checkbox lists and feature lists
+  if (data.features.length === 0) {
+    const amenitySelectors = [
+      ".amenities li",
+      ".amenities-list li",
+      "ul.features li",
+      "[class*='amenities'] li",
+    ];
+    for (const sel of amenitySelectors) {
+      $(sel).each((_, el) => {
+        const text = $(el).text().trim();
+        if (text.length > 0 && text.length < 100) data.features.push(text);
+      });
+      if (data.features.length > 0) { found = true; break; }
+    }
+    // RentHop uses checked checkboxes for amenities
+    if (data.features.length === 0) {
+      $("input[type='checkbox']").each((_, el) => {
+        if ($(el).attr("checked") !== undefined || $(el).prop("checked")) {
+          const label = $(el).closest("label").text().trim()
+            || $(el).next("label").text().trim()
+            || $(el).attr("name") || "";
+          if (label.length > 0 && label.length < 100) data.features.push(label);
+        }
+      });
+      if (data.features.length > 0) found = true;
+    }
+  }
+
+  // Transit (stored in extras)
+  const transitItems: { name: string; lines?: string; distance?: string }[] = [];
+  $(".transit-section li, [class*='transit'] li").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length > 0 && text.length < 200) transitItems.push({ name: text });
+  });
+  if (transitItems.length === 0) {
+    // Look for sections containing "Transit" or "Subway"
+    $("h2, h3, h4").each((_, heading) => {
+      const label = $(heading).text().trim().toLowerCase();
+      if (label.includes("transit") || label.includes("subway") || label.includes("train")) {
+        $(heading).nextAll("ul, ol").first().find("li").each((_, li) => {
+          const text = $(li).text().trim();
+          if (text.length > 0 && text.length < 200) transitItems.push({ name: text });
+        });
+      }
+    });
+  }
+  if (transitItems.length > 0) { (data.extras as Record<string, unknown>).transit = transitItems; found = true; }
+
+  // Schools (stored in extras)
+  const schoolItems: { name: string; grades?: string; distance?: string }[] = [];
+  $(".schools-section li, [class*='school'] li").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text.length > 0 && text.length < 200) schoolItems.push({ name: text });
+  });
+  if (schoolItems.length === 0) {
+    $("h2, h3, h4").each((_, heading) => {
+      const label = $(heading).text().trim().toLowerCase();
+      if (label.includes("school")) {
+        $(heading).nextAll("ul, ol").first().find("li").each((_, li) => {
+          const text = $(li).text().trim();
+          if (text.length > 0 && text.length < 200) schoolItems.push({ name: text });
+        });
+      }
+    });
+  }
+  if (schoolItems.length > 0) { (data.extras as Record<string, unknown>).schools = schoolItems; found = true; }
+
+  // Broker name
+  if (!data.brokerName) {
+    const broker = $(".agent-name, .broker-name, .listing-contact h3").first().text().trim();
+    if (broker) { data.brokerName = broker; found = true; }
   }
 
   // Neighborhood from location/breadcrumb
@@ -680,7 +894,7 @@ export function parseListing(html: string, url: string): ListingData {
     price: null, priceDelta: null, beds: null, baths: null, sqft: null,
     description: null, features: [], photos: [],
     latitude: null, longitude: null, sourceListingId: null,
-    source, url, extractedBy: [],
+    brokerName: null, source, url, extractedBy: [], extras: {},
   };
 
   // Site-specific selectors first (most accurate when available)
@@ -704,11 +918,6 @@ export function parseListing(html: string, url: string): ListingData {
   if (data.source === "streeteasy") {
     if (data.baths != null && (data.baths < 0 || data.baths > 10)) data.baths = null;
     if (data.beds != null && saneBeds(data.beds) === null) data.beds = null;
-  }
-
-  // Truncate description for display
-  if (data.description && data.description.length > 300) {
-    data.description = data.description.slice(0, 300) + "...";
   }
 
   return data;

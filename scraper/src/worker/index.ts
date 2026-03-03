@@ -8,6 +8,7 @@ import { startScrapeListingWorker } from "./scrapeListing.js";
 import { startRefreshWorker, enqueueRefreshes } from "./refresh.js";
 import { startGeocodeWorker } from "./geocode.js";
 import { startAnalyzeTextWorker } from "./analyzeText.js";
+import { startAnalyzePhotosWorker } from "./analyzePhotos.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
 import { closeQueues } from "../queues.js";
 import { prisma } from "../db.js";
@@ -37,12 +38,14 @@ async function main() {
   const refreshWorker = startRefreshWorker();
   const geocodeWorker = startGeocodeWorker();
   const analyzeTextWorker = startAnalyzeTextWorker();
+  const analyzePhotosWorker = startAnalyzePhotosWorker();
 
-  crawlWorker.on("error",      (e) => console.error("[crawl-index] Worker error:", e));
-  scrapeWorker.on("error",     (e) => console.error("[scrape-listing] Worker error:", e));
-  refreshWorker.on("error",    (e) => console.error("[refresh] Worker error:", e));
-  geocodeWorker.on("error",    (e) => console.error("[geocode] Worker error:", e));
-  analyzeTextWorker.on("error",(e) => console.error("[analyze-text] Worker error:", e));
+  crawlWorker.on("error",         (e) => console.error("[crawl-index] Worker error:", e));
+  scrapeWorker.on("error",        (e) => console.error("[scrape-listing] Worker error:", e));
+  refreshWorker.on("error",       (e) => console.error("[refresh] Worker error:", e));
+  geocodeWorker.on("error",       (e) => console.error("[geocode] Worker error:", e));
+  analyzeTextWorker.on("error",   (e) => console.error("[analyze-text] Worker error:", e));
+  analyzePhotosWorker.on("error", (e) => console.error("[analyze-photos] Worker error:", e));
 
   // ── Start scheduler (polls for due CrawlJobs, enqueues crawl-index jobs)
   await startScheduler();
@@ -62,7 +65,7 @@ async function main() {
     if (n > 0) console.log(`[refresh] Enqueued ${n} refresh job(s) at startup`);
   }).catch(() => {});
 
-  console.log("Workers running: crawl-index, scrape-listing, refresh-listing, geocode-listing, analyze-text + scheduler");
+  console.log("Workers running: crawl-index, scrape-listing, refresh-listing, geocode-listing, analyze-text, analyze-photos + scheduler");
 
   const shutdown = async () => {
     console.log("\n[worker] Shutting down…");
@@ -75,6 +78,7 @@ async function main() {
       refreshWorker.close(),
       geocodeWorker.close(),
       analyzeTextWorker.close(),
+      analyzePhotosWorker.close(),
       closeQueues(),
       prisma.$disconnect(),
     ]);
