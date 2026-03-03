@@ -720,104 +720,169 @@ export function ListingsPage() {
               </div>
             </div>
 
-            {/* ── Advanced filters (collapsible) ── */}
-            <div className="mb-4">
-              <button
-                type="button"
-                onClick={() => setShowFilters((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="11" y1="18" x2="13" y2="18" />
-                </svg>
-                Advanced filters
-                <span className={`transition-transform duration-150 ${showFilters ? "rotate-180" : ""}`}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
-                </span>
-              </button>
+            {/* ── Filters (collapsible) ── */}
+            {(() => {
+              const activeCount = [minBeds !== null, minBaths !== null, !!minPrice || !!maxPrice].filter(Boolean).length;
+              const bedOptions = [
+                { label: "Any", value: null },
+                { label: "Studio", value: 0 },
+                { label: "1", value: 1 },
+                { label: "2", value: 2 },
+                { label: "3", value: 3 },
+                { label: "4+", value: 4 },
+              ];
+              const bathOptions = [
+                { label: "Any", value: null },
+                { label: "1+", value: 1 },
+                { label: "2+", value: 2 },
+                { label: "3+", value: 3 },
+              ];
+              return (
+                <div className="mb-5">
+                  {/* Toggle button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters((v) => !v)}
+                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-medium transition-all duration-150 ${
+                      showFilters || activeCount > 0
+                        ? "bg-[var(--accent-light)] border-[var(--accent)]/40 text-[var(--accent)]"
+                        : "bg-[var(--card)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+                    }`}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="11" y1="18" x2="13" y2="18" />
+                    </svg>
+                    Filters
+                    {activeCount > 0 && (
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[var(--accent)] text-white text-[9px] font-bold leading-none">
+                        {activeCount}
+                      </span>
+                    )}
+                    <svg
+                      width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      className={`transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
 
-              {showFilters && (
-                <div className="mt-3 p-4 bg-[var(--card)] border border-[var(--border)] rounded-xl space-y-4 animate-fade-in">
+                  {/* Panel */}
+                  {showFilters && (
+                    <div className="mt-2.5 bg-[var(--card)] border border-[var(--border)] rounded-2xl overflow-hidden shadow-sm animate-fade-in">
 
-                  {/* Beds */}
-                  <div>
-                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Bedrooms</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { label: "Any",    value: null },
-                        { label: "Studio", value: 0 },
-                        { label: "1+",     value: 1 },
-                        { label: "2+",     value: 2 },
-                        { label: "3+",     value: 3 },
-                        { label: "4+",     value: 4 },
-                      ].map(({ label, value }) => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => setMinBeds(value)}
-                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                            minBeds === value
-                              ? "bg-[var(--foreground)] text-[var(--card)] border-[var(--foreground)]"
-                              : "bg-[var(--background)] text-[var(--muted)] border-[var(--border)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                      {/* Beds + Baths — side by side */}
+                      <div className="grid grid-cols-2 divide-x divide-[var(--border)]">
+
+                        {/* Bedrooms */}
+                        <div className="p-4">
+                          <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Bedrooms</p>
+                          <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
+                            {bedOptions.map(({ label, value }, i) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setMinBeds(value)}
+                                className={`flex-1 py-2 text-[11px] font-medium transition-all duration-150 ${
+                                  i < bedOptions.length - 1 ? "border-r border-[var(--border)]" : ""
+                                } ${
+                                  minBeds === value
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-transparent text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Bathrooms */}
+                        <div className="p-4">
+                          <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Bathrooms</p>
+                          <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
+                            {bathOptions.map(({ label, value }, i) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setMinBaths(value)}
+                                className={`flex-1 py-2 text-[11px] font-medium transition-all duration-150 ${
+                                  i < bathOptions.length - 1 ? "border-r border-[var(--border)]" : ""
+                                } ${
+                                  minBaths === value
+                                    ? "bg-[var(--accent)] text-white"
+                                    : "bg-transparent text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="h-px bg-[var(--border)]" />
+
+                      {/* Price range */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Monthly rent</p>
+                        <div className="flex items-center gap-3">
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--muted-light)] select-none pointer-events-none">$</span>
+                            <input
+                              type="number"
+                              placeholder="No min"
+                              value={minPrice}
+                              onChange={(e) => setMinPrice(e.target.value)}
+                              className="w-full pl-6 pr-3 py-2.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40 focus:border-[var(--accent)] transition"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <div className="w-3 h-px bg-[var(--border)]" />
+                          </div>
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--muted-light)] select-none pointer-events-none">$</span>
+                            <input
+                              type="number"
+                              placeholder="No max"
+                              value={maxPrice}
+                              onChange={(e) => setMaxPrice(e.target.value)}
+                              className="w-full pl-6 pr-3 py-2.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40 focus:border-[var(--accent)] transition"
+                            />
+                          </div>
+                          {(minPrice || maxPrice) && (
+                            <button
+                              type="button"
+                              onClick={() => { setMinPrice(""); setMaxPrice(""); }}
+                              className="shrink-0 text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors"
+                              aria-label="Clear price"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Footer: reset */}
+                      {activeCount > 0 && (
+                        <>
+                          <div className="h-px bg-[var(--border)]" />
+                          <div className="px-4 py-2.5 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => { setMinBeds(null); setMinBaths(null); setMinPrice(""); setMaxPrice(""); }}
+                              className="text-[11px] text-[var(--muted)] hover:text-[var(--accent)] transition-colors font-medium"
+                            >
+                              Reset filters
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-
-                  {/* Baths */}
-                  <div>
-                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Bathrooms</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { label: "Any", value: null },
-                        { label: "1+",  value: 1 },
-                        { label: "2+",  value: 2 },
-                        { label: "3+",  value: 3 },
-                      ].map(({ label, value }) => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => setMinBaths(value)}
-                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                            minBaths === value
-                              ? "bg-[var(--foreground)] text-[var(--card)] border-[var(--foreground)]"
-                              : "bg-[var(--background)] text-[var(--muted)] border-[var(--border)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Price range */}
-                  <div>
-                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Monthly rent</span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        placeholder="Min"
-                        value={minPrice}
-                        onChange={(e) => setMinPrice(e.target.value)}
-                        className="w-28 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition"
-                      />
-                      <span className="text-[var(--muted-light)] text-sm">–</span>
-                      <input
-                        type="number"
-                        placeholder="Max"
-                        value={maxPrice}
-                        onChange={(e) => setMaxPrice(e.target.value)}
-                        className="w-28 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition"
-                      />
-                    </div>
-                  </div>
-
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* ── Preference summary bar ── */}
             {prefChips.length > 0 && (
