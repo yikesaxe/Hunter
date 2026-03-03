@@ -465,6 +465,8 @@ export function ListingsPage() {
   const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<SortMode>("match");
   const [showFilters, setShowFilters] = useState(false);
+  const [minBeds, setMinBeds] = useState<number | null>(null); // null=any, 0=studio, 1,2,3,4
+  const [minBaths, setMinBaths] = useState<number | null>(null); // null=any, 1, 2
   const [showInsight, setShowInsight] = useState(true);
   const [inputFocused, setInputFocused] = useState(false);
 
@@ -529,7 +531,7 @@ export function ListingsPage() {
     el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [hoveredListingId]);
 
-  // Apply neighborhood filter
+  // Apply client-side filters
   const neighborhoodFiltered = listings
     .filter((l) => !hiddenIds.has(l.id))
     .filter((l) => {
@@ -539,6 +541,15 @@ export function ListingsPage() {
           l.neighborhood?.toLowerCase().includes(part.trim().toLowerCase())
         )
       );
+    })
+    .filter((l) => {
+      if (minBeds === null) return true;
+      if (minBeds === 0) return l.beds === 0; // studio exactly
+      return (l.beds ?? 0) >= minBeds;
+    })
+    .filter((l) => {
+      if (minBaths === null) return true;
+      return (l.baths ?? 0) >= minBaths;
     });
 
   // Apply client-side sort
@@ -569,12 +580,15 @@ export function ListingsPage() {
   if (minPrice || maxPrice) {
     prefChips.push(`Budget: ${minPrice ? `$${Number(minPrice).toLocaleString()}` : "—"} – ${maxPrice ? `$${Number(maxPrice).toLocaleString()}` : "any"}`);
   }
+  if (minBeds !== null) {
+    prefChips.push(minBeds === 0 ? "Studio" : `${minBeds}+ bed${minBeds === 1 ? "" : "s"}`);
+  }
+  if (minBaths !== null) prefChips.push(`${minBaths}+ bath${minBaths === 1 ? "" : "s"}`);
   if (selectedNeighborhoods.size > 0) {
     const areas = [...selectedNeighborhoods].slice(0, 2).join(", ");
     const extra = selectedNeighborhoods.size > 2 ? ` +${selectedNeighborhoods.size - 2}` : "";
     prefChips.push(`Areas: ${areas}${extra}`);
   }
-  if (source) prefChips.push(`Source: ${source}`);
 
   // ── For You mode: original layout ──────────────────────────────────────────
   if (mode !== "search") {
@@ -723,28 +737,84 @@ export function ListingsPage() {
               </button>
 
               {showFilters && (
-                <div className="mt-3 p-4 bg-[var(--card)] border border-[var(--border)] rounded-xl flex flex-wrap gap-3 items-end animate-fade-in">
-                  <label>
-                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-1.5">Source</span>
-                    <select value={source} onChange={(e) => setSource(e.target.value)}
-                      className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition">
-                      <option value="">All sources</option>
-                      {sources.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </label>
-                  <div className="flex gap-2 items-end">
-                    <label>
-                      <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-1.5">Min $</span>
-                      <input type="number" placeholder="0" value={minPrice} onChange={(e) => setMinPrice(e.target.value)}
-                        className="w-20 px-3 py-2 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition" />
-                    </label>
-                    <span className="text-[var(--muted-light)] pb-2.5 text-sm">–</span>
-                    <label>
-                      <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-1.5">Max $</span>
-                      <input type="number" placeholder="any" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)}
-                        className="w-20 px-3 py-2 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition" />
-                    </label>
+                <div className="mt-3 p-4 bg-[var(--card)] border border-[var(--border)] rounded-xl space-y-4 animate-fade-in">
+
+                  {/* Beds */}
+                  <div>
+                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Bedrooms</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { label: "Any",    value: null },
+                        { label: "Studio", value: 0 },
+                        { label: "1+",     value: 1 },
+                        { label: "2+",     value: 2 },
+                        { label: "3+",     value: 3 },
+                        { label: "4+",     value: 4 },
+                      ].map(({ label, value }) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => setMinBeds(value)}
+                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                            minBeds === value
+                              ? "bg-[var(--foreground)] text-[var(--card)] border-[var(--foreground)]"
+                              : "bg-[var(--background)] text-[var(--muted)] border-[var(--border)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Baths */}
+                  <div>
+                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Bathrooms</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { label: "Any", value: null },
+                        { label: "1+",  value: 1 },
+                        { label: "2+",  value: 2 },
+                        { label: "3+",  value: 3 },
+                      ].map(({ label, value }) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => setMinBaths(value)}
+                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                            minBaths === value
+                              ? "bg-[var(--foreground)] text-[var(--card)] border-[var(--foreground)]"
+                              : "bg-[var(--background)] text-[var(--muted)] border-[var(--border)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Price range */}
+                  <div>
+                    <span className="block text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-2">Monthly rent</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        placeholder="Min"
+                        value={minPrice}
+                        onChange={(e) => setMinPrice(e.target.value)}
+                        className="w-28 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition"
+                      />
+                      <span className="text-[var(--muted-light)] text-sm">–</span>
+                      <input
+                        type="number"
+                        placeholder="Max"
+                        value={maxPrice}
+                        onChange={(e) => setMaxPrice(e.target.value)}
+                        className="w-28 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition"
+                      />
+                    </div>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -758,7 +828,7 @@ export function ListingsPage() {
                     {chip}
                   </span>
                 ))}
-                <button type="button" onClick={() => { setMinPrice(""); setMaxPrice(""); setSource(""); setSelectedNeighborhoods(new Set()); }}
+                <button type="button" onClick={() => { setMinPrice(""); setMaxPrice(""); setSource(""); setMinBeds(null); setMinBaths(null); setSelectedNeighborhoods(new Set()); }}
                   className="ml-auto text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors text-[10px]">
                   Clear ×
                 </button>
