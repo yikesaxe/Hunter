@@ -205,30 +205,25 @@ function ListingCard({
         )}
 
         {/* Bottom gradient scrim */}
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/55 via-black/20 to-transparent pointer-events-none" />
+        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
 
-        {/* Price overlay — bottom left */}
-        {listing.price != null && (
-          <div className="absolute bottom-3 left-3">
-            <div className="flex items-baseline gap-0.5 bg-[var(--accent)] text-white px-3 py-1.5 rounded-xl shadow-lg">
-              <span className="font-serif text-[1.15rem] font-semibold leading-none">
-                ${listing.price.toLocaleString()}
-              </span>
-              <span className="text-[11px] opacity-80 ml-0.5">/mo</span>
-            </div>
-          </div>
-        )}
-
-        {/* Source badge — top right */}
+        {/* Price badge — top right (replaces source label) */}
         <div className="absolute top-3 right-3 flex items-center gap-1.5">
           {(listing.siblingCount ?? 0) > 0 && (
             <span className="bg-[var(--accent)]/90 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-sm">
               +{listing.siblingCount}
             </span>
           )}
-          <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
-            {listing.source}
-          </span>
+          {listing.price != null ? (
+            <span className="bg-white/95 backdrop-blur-sm text-[var(--foreground)] text-[11.5px] font-semibold tabular-nums px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
+              ${listing.price.toLocaleString()}
+              <span className="text-[var(--muted)] font-normal">/mo</span>
+            </span>
+          ) : (
+            <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
+              {listing.source}
+            </span>
+          )}
         </div>
 
         {/* Photo counter */}
@@ -465,6 +460,8 @@ export function ListingsPage() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [hoveredListingId, setHoveredListingId] = useState<string | null>(null);
+  const cardRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
+  const hoverSourceRef = useRef<"card" | "map">("card");
   const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<SortMode>("match");
   const [showFilters, setShowFilters] = useState(false);
@@ -524,6 +521,13 @@ export function ListingsPage() {
       return next;
     });
   }, []);
+
+  // When a map pin is hovered, scroll the corresponding card into view
+  useEffect(() => {
+    if (!hoveredListingId || hoverSourceRef.current !== "map") return;
+    const el = cardRefsMap.current.get(hoveredListingId);
+    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [hoveredListingId]);
 
   // Apply neighborhood filter
   const neighborhoodFiltered = listings
@@ -829,16 +833,17 @@ export function ListingsPage() {
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {visibleListings.map((l, i) => (
+                    <div key={l.id} ref={(el) => { if (el) cardRefsMap.current.set(l.id, el); else cardRefsMap.current.delete(l.id); }}>
                     <ListingCard
-                      key={l.id}
                       listing={l}
                       index={i}
                       compact
                       isSaved={savedIds.has(l.id)}
                       onSaveToggle={handleSaveToggle}
                       isHovered={hoveredListingId === l.id}
-                      onHoverChange={(h) => setHoveredListingId(h ? l.id : null)}
+                      onHoverChange={(h) => { hoverSourceRef.current = "card"; setHoveredListingId(h ? l.id : null); }}
                     />
+                    </div>
                   ))}
                 </div>
                 {hasMore && (
@@ -862,7 +867,7 @@ export function ListingsPage() {
             hoveredListingId={hoveredListingId}
             selectedNeighborhoods={selectedNeighborhoods}
             onNeighborhoodToggle={handleNeighborhoodToggle}
-            onPinHover={setHoveredListingId}
+            onPinHover={(id) => { hoverSourceRef.current = "map"; setHoveredListingId(id); }}
             onPinClick={(id) => { window.location.href = `/listings/${id}`; }}
           />
           {showInsight && <MapInsightCard onClose={() => setShowInsight(false)} />}
