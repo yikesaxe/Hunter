@@ -194,6 +194,7 @@ export async function GET(req: NextRequest) {
       const otherSources = [...new Set(allSources.filter((s) => s !== l.source))];
       return {
         ...l,
+        price: l.rentGross ?? null,
         siblingCount: otherSources.length,
         otherSources,
         analysis: l.analysis ?? null,
