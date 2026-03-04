@@ -125,7 +125,7 @@ export function MapView({
           type: "fill",
           source: "neighborhoods",
           paint: {
-            "fill-color": "#C27D3A",
+            "fill-color": "#E8714A",
             "fill-opacity": [
               "case",
               ["in", ["get", "ntaname"], ["literal", selectedArr]],
@@ -143,7 +143,7 @@ export function MapView({
             "line-color": [
               "case",
               ["in", ["get", "ntaname"], ["literal", selectedArr]],
-              "#C27D3A",
+              "#E8714A",
               "#C8BFB5",
             ],
             "line-width": [
@@ -160,7 +160,7 @@ export function MapView({
           type: "fill",
           source: "neighborhoods",
           paint: {
-            "fill-color": "#C27D3A",
+            "fill-color": "#E8714A",
             "fill-opacity": 0.1,
           },
           filter: ["==", "ntaname", ""],
@@ -221,7 +221,7 @@ export function MapView({
     map.setPaintProperty("neighborhood-outline", "line-color", [
       "case",
       ["in", ["get", "ntaname"], ["literal", selectedArr]],
-      "#C27D3A",
+      "#E8714A",
       "#C8BFB5",
     ]);
     map.setPaintProperty("neighborhood-outline", "line-width", [

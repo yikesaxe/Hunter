@@ -455,13 +455,42 @@ function extractFromStreetEasy($: cheerio.CheerioAPI, url: string, data: Listing
     if (data.features.length > 0) found = true;
   }
 
-  // Photos
+  // Photos — parse __NEXT_DATA__ first. StreetEasy is a Next.js app and embeds the full
+  // listing photo array in its page JSON. Photos are served from photos.zillowstatic.com
+  // (StreetEasy is Zillow-owned). This gives us ALL photos, not just the hero image.
+  if (data.photos.length === 0) {
+    const nextDataEl = $("#__NEXT_DATA__");
+    if (nextDataEl.length) {
+      const raw = nextDataEl.html() || "";
+      // Pull every zillowstatic photo URL from the embedded JSON.
+      // Floorplan images contain "floorplan" in the path — exclude them.
+      const matches = raw.match(/https:\/\/photos\.zillowstatic\.com\/[^"\\]+/g);
+      if (matches) {
+        const seen = new Set<string>();
+        for (const photoUrl of matches) {
+          if (!seen.has(photoUrl) && !/floorplan/i.test(photoUrl)) {
+            seen.add(photoUrl);
+            data.photos.push(photoUrl);
+          }
+        }
+        if (data.photos.length > 0) found = true;
+      }
+    }
+  }
+
+  // Photo fallback — img[src] scan for cases where __NEXT_DATA__ is absent or the CDN changes.
+  // Also cover photos.zillowstatic.com here since that is the real StreetEasy CDN.
   if (data.photos.length === 0) {
     $("img").each((_, el) => {
       const src = $(el).attr("src") || "";
-      if (src.includes("image.streeteasy.com") || src.includes("photos.streeteasy.com")) {
-        data.photos.push(src);
-      }
+      const alt = ($(el).attr("alt") || "").toLowerCase();
+      const isPhoto =
+        src.includes("image.streeteasy.com") ||
+        src.includes("photos.streeteasy.com") ||
+        src.includes("photos.zillowstatic.com");
+      const isFloorplan =
+        /floorplan/i.test(src) || alt.includes("floor plan") || alt.includes("floorplan");
+      if (isPhoto && !isFloorplan) data.photos.push(src);
     });
     if (data.photos.length > 0) found = true;
   }

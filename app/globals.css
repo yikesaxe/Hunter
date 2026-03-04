@@ -9,9 +9,9 @@
   --muted-light: #B0A99F;
   --border: #E3DDD5;
   --card: #FFFFFF;
-  --accent: #C27D3A;
-  --accent-hover: #A5651E;
-  --accent-light: #F2E8D9;
+  --accent: #E8714A;
+  --accent-hover: #C75C35;
+  --accent-light: #FDEAE5;
   --surface: #EEEBE4;
 }
 
@@ -44,9 +44,9 @@ body {
 }
 
 @keyframes markerPulse {
-  0%   { box-shadow: 0 4px 20px rgba(194,125,58,0.5), 0 0 0 0 rgba(194,125,58,0.45); }
-  70%  { box-shadow: 0 4px 20px rgba(194,125,58,0.5), 0 0 0 10px rgba(194,125,58,0); }
-  100% { box-shadow: 0 4px 20px rgba(194,125,58,0.5), 0 0 0 0 rgba(194,125,58,0); }
+  0%   { box-shadow: 0 4px 20px rgba(232,113,74,0.5), 0 0 0 0 rgba(232,113,74,0.45); }
+  70%  { box-shadow: 0 4px 20px rgba(232,113,74,0.5), 0 0 0 10px rgba(232,113,74,0); }
+  100% { box-shadow: 0 4px 20px rgba(232,113,74,0.5), 0 0 0 0 rgba(232,113,74,0); }
 }
 
 .animate-fade-up {
@@ -65,6 +65,33 @@ body {
 
 .animate-tray-in {
   animation: trayIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* ── Scrollbar hide ── */
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Scrollbar thin ── */
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #D4C9BA transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #D4C9BA;
+  border-radius: 10px;
 }
 
 /* ── Map price marker pills ── */
@@ -102,8 +129,8 @@ body {
 }
 
 .price-marker:hover {
-  background: #C27D3A;
-  border-color: #C27D3A;
+  background: #E8714A;
+  border-color: #E8714A;
   color: #FFFFFF;
   box-shadow: 0 4px 16px rgba(194, 125, 58, 0.4);
   transform: translateY(-1px) scale(1.04);
@@ -111,13 +138,13 @@ body {
 }
 
 .price-marker:hover::after {
-  background: #C27D3A;
-  border-color: #C27D3A;
+  background: #E8714A;
+  border-color: #E8714A;
 }
 
 .price-marker.active {
-  background: #C27D3A;
-  border-color: #C27D3A;
+  background: #E8714A;
+  border-color: #E8714A;
   color: #FFFFFF;
   transform: translateY(-3px) scale(1.1);
   z-index: 20;
@@ -125,6 +152,6 @@ body {
 }
 
 .price-marker.active::after {
-  background: #C27D3A;
-  border-color: #C27D3A;
+  background: #E8714A;
+  border-color: #E8714A;
 }

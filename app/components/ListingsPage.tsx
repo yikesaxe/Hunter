@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 const MapView = dynamic(() => import("./MapView").then((m) => m.MapView), {
   ssr: false,
@@ -29,6 +29,7 @@ type Listing = {
   baths: number | null;
   sqft: number | null;
   photos: unknown;
+  amenities: string | null;
   lastScrapedAt: string;
   latitude: number | null;
   longitude: number | null;
@@ -41,6 +42,14 @@ type Listing = {
 
 type ListMode = "search" | "recommended";
 type SortMode = "match" | "value" | "space";
+
+type AiSearchResult = {
+  listings: Listing[];
+  total: number;
+  scrapeTriggered: boolean;
+  runId: string | null;
+  summary: string;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -80,11 +89,41 @@ function parsePhotos(raw: unknown): string[] {
 
 function getListingTags(listing: Listing): string[] {
   const tags: string[] = [];
-  if (listing.analysis?.priceTier === "below_market") tags.push("Below market");
+  // "Below market" is now shown as a photo badge — skip here to avoid duplication
   if ((listing.siblingCount ?? 0) > 0) tags.push(`+${listing.siblingCount} sources`);
   if (listing.sqft) tags.push(`${listing.sqft.toLocaleString()} sqft`);
   return tags;
 }
+
+// ── Listing badge (photo overlay, top-left) ───────────────────────────────────
+
+type BadgeVariant = "no-fee" | "deal" | "new" | "ai-pick";
+type ListingBadge = { label: string; variant: BadgeVariant };
+
+function getListingBadge(listing: Listing, isAiResult?: boolean): ListingBadge | null {
+  // Priority 1 — No Fee: highest financial signal
+  const amenities = (listing.amenities ?? "").toLowerCase();
+  if (amenities.includes("no fee")) return { label: "No Fee", variant: "no-fee" };
+
+  // Priority 2 — Below Market: AI-confirmed pricing edge
+  if (listing.analysis?.priceTier === "below_market") return { label: "Below Market", variant: "deal" };
+
+  // Priority 3 — New: scraped within the last 48 hours
+  const ageHours = (Date.now() - new Date(listing.lastScrapedAt).getTime()) / 3_600_000;
+  if (ageHours < 48) return { label: "New", variant: "new" };
+
+  // Priority 4 — AI Pick: surfaced by AI with strong match score
+  if (isAiResult && (listing.matchScore ?? 0) >= 60) return { label: "AI Pick", variant: "ai-pick" };
+
+  return null;
+}
+
+const BADGE_STYLES: Record<BadgeVariant, string> = {
+  "no-fee":  "bg-emerald-700/88 text-white shadow-emerald-900/20",
+  "deal":    "bg-[#1E3A2A]/90 text-emerald-100 shadow-green-900/20",
+  "new":     "bg-[#1C2B4A]/90 text-sky-100 shadow-blue-900/20",
+  "ai-pick": "bg-[var(--accent)]/90 text-white shadow-[var(--accent)]/20",
+};
 
 // ── HeartIcon ─────────────────────────────────────────────────────────────────
 
@@ -109,6 +148,7 @@ function ListingCard({
   isHovered,
   onHoverChange,
   compact,
+  isAiResult,
 }: {
   listing: Listing;
   index: number;
@@ -120,6 +160,7 @@ function ListingCard({
   isHovered?: boolean;
   onHoverChange?: (hovered: boolean) => void;
   compact?: boolean;
+  isAiResult?: boolean;
 }) {
   const photos = parsePhotos(listing.photos);
   const [photoIdx, setPhotoIdx] = useState(0);
@@ -160,6 +201,7 @@ function ListingCard({
     .slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 
   const tags = getListingTags(listing);
+  const badge = getListingBadge(listing, isAiResult);
 
   const subline = [
     listing.beds != null ? `${listing.beds} ${listing.beds === 1 ? "bed" : "beds"}` : null,
@@ -171,8 +213,8 @@ function ListingCard({
     <div
       className={`group bg-[var(--card)] rounded-2xl overflow-hidden border transition-all duration-300 animate-fade-up flex flex-col ${
         isHovered
-          ? "border-[var(--accent)] shadow-[0_4px_24px_rgba(194,125,58,0.18)] ring-1 ring-[var(--accent)]/20"
-          : "border-[var(--border)] hover:border-[var(--accent)]/60 hover:shadow-lg"
+          ? "border-[var(--accent)]/60 shadow-[0_8px_32px_rgba(232,113,74,0.16)] ring-1 ring-[var(--accent)]/20"
+          : "border-[var(--border)]/60 shadow-sm hover:shadow-xl hover:border-[var(--border)]"
       }`}
       style={{ animationDelay: `${Math.min(index * 30, 360)}ms` }}
       onMouseEnter={() => onHoverChange?.(true)}
@@ -182,7 +224,7 @@ function ListingCard({
       <a
         href={`/listings/${listing.id}`}
         className="block relative overflow-hidden bg-[var(--surface)] flex-shrink-0"
-        style={{ aspectRatio: compact ? "16/10" : "4/3" }}
+        style={{ aspectRatio: "4/3" }}
         onClick={() => trackEvent(listing.id, "click")}
       >
         {showImage ? (
@@ -207,30 +249,36 @@ function ListingCard({
         {/* Bottom gradient scrim */}
         <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
 
-        {/* Price badge — top right (replaces source label) */}
-        <div className="absolute top-3 right-3 flex items-center gap-1.5">
-          {(listing.siblingCount ?? 0) > 0 && (
-            <span className="bg-[var(--accent)]/90 backdrop-blur-sm text-white text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-sm">
-              +{listing.siblingCount}
-            </span>
-          )}
-          {listing.price != null ? (
-            <span className="bg-white/95 backdrop-blur-sm text-[var(--foreground)] text-[11.5px] font-semibold tabular-nums px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
-              ${listing.price.toLocaleString()}
-              <span className="text-[var(--muted)] font-normal">/mo</span>
-            </span>
-          ) : (
-            <span className="bg-white/90 backdrop-blur-sm text-[var(--muted)] text-[10px] font-medium uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/60 shadow-sm">
-              {listing.source}
-            </span>
-          )}
-        </div>
+        {/* Quality badge — top left */}
+        {badge && (
+          <div className={`absolute top-3 left-3 flex items-center gap-1.5 backdrop-blur-sm px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide shadow-md ${BADGE_STYLES[badge.variant]}`}>
+            {badge.variant === "new" && (
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-300 animate-pulse shrink-0" />
+            )}
+            {badge.variant === "ai-pick" && (
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+              </svg>
+            )}
+            {badge.variant === "no-fee" && (
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            )}
+            {badge.variant === "deal" && (
+              <span className="text-[8px] leading-none shrink-0">↓</span>
+            )}
+            {badge.label}
+          </div>
+        )}
 
-        {/* Photo counter */}
-        {photos.length > 1 && (
-          <span className="absolute top-3 left-3 bg-black/45 backdrop-blur-sm text-white text-[10px] font-medium tabular-nums px-2 py-0.5 rounded-full">
-            {photoIdx + 1}/{photos.length}
-          </span>
+        {/* Sibling count — top right (price moves to card body) */}
+        {(listing.siblingCount ?? 0) > 0 && (
+          <div className="absolute top-3 right-3">
+            <span className="bg-black/50 backdrop-blur-sm text-white text-[10px] font-medium px-2 py-0.5 rounded-full shadow-sm">
+              +{listing.siblingCount} sources
+            </span>
+          </div>
         )}
 
         {/* Prev/Next arrows */}
@@ -247,9 +295,16 @@ function ListingCard({
           </>
         )}
 
-        {/* Dot indicators */}
+        {/* Photo counter — bottom left, only when multiple photos */}
+        {photos.length > 1 && (
+          <span className="absolute bottom-3 left-3 bg-black/45 backdrop-blur-sm text-white text-[10px] font-medium tabular-nums px-2 py-0.5 rounded-full">
+            {photoIdx + 1}/{photos.length}
+          </span>
+        )}
+
+        {/* Dot indicators — bottom center */}
         {photos.length > 1 && photos.length <= 10 && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 ml-16">
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
             {photos.map((_, i) => (
               <button key={i} type="button" aria-label={`Photo ${i + 1}`} onClick={(e) => goTo(i, e)}
                 className="transition-all duration-200"
@@ -267,56 +322,54 @@ function ListingCard({
       </a>
 
       {/* ── Card body ── */}
-      <div className="flex flex-col flex-1 p-4">
-        <a href={`/listings/${listing.id}`} onClick={() => trackEvent(listing.id, "click")}>
+      <div className="flex flex-col flex-1 px-4 pt-3.5 pb-4">
+        <a href={`/listings/${listing.id}`} onClick={() => trackEvent(listing.id, "click")} className="flex-1">
           {/* Address */}
-          <h3 className="font-semibold text-[var(--foreground)] text-[0.875rem] leading-snug mb-0.5 line-clamp-1">
+          <h3 className="font-semibold text-[var(--foreground)] text-[0.9rem] leading-snug mb-0.5 line-clamp-1">
             {listing.address ?? listing.title ?? "—"}
           </h3>
 
           {/* Beds · Bath · Neighborhood */}
           {subline && (
-            <p className="text-xs text-[var(--muted)] mb-2.5 leading-relaxed">{subline}</p>
+            <p className="text-[12.5px] text-[var(--muted)] mb-3 leading-relaxed">{subline}</p>
           )}
 
-          {/* AI summary */}
+          {/* Price — prominent, Airbnb-style */}
+          {listing.price != null && (
+            <p className="text-[0.95rem] font-semibold text-[var(--foreground)] tabular-nums mb-2">
+              ${listing.price.toLocaleString()}
+              <span className="text-[var(--muted)] font-normal text-[0.8rem]"> /mo</span>
+            </p>
+          )}
+
+          {/* AI summary — 1 line, subtle */}
           {listing.analysis?.summary && (
-            <p className="text-xs text-[var(--muted)] italic mb-3 leading-relaxed line-clamp-2">
+            <p className="text-[11.5px] text-[var(--muted-light)] italic leading-relaxed line-clamp-1 mb-2">
               {listing.analysis.summary}
             </p>
           )}
         </a>
 
-        {/* Tags */}
-        {tags.length > 0 && (
+        {/* Tags + red flags row */}
+        {(tags.length > 0 || (() => { const f = Array.isArray(listing.analysis?.redFlags) ? listing.analysis!.redFlags as string[] : []; return f.length > 0; })()) && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             {tags.map((tag) => (
-              <span key={tag} className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                tag === "Below market"
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                  : "bg-[var(--surface)] text-[var(--muted)]"
-              }`}>
+              <span key={tag} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[var(--surface)] text-[var(--muted)]">
                 {tag}
               </span>
             ))}
+            {(() => {
+              const flags = Array.isArray(listing.analysis?.redFlags) ? listing.analysis!.redFlags as string[] : [];
+              return flags.slice(0, 1).map((flag) => (
+                <span key={flag} className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-100">
+                  ⚠ {flag.length > 38 ? flag.slice(0, 36) + "…" : flag}
+                </span>
+              ));
+            })()}
           </div>
         )}
 
-        {/* Red flags — clean, not alarming */}
-        {(() => {
-          const flags = Array.isArray(listing.analysis?.redFlags) ? listing.analysis!.redFlags as string[] : [];
-          return flags.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {flags.slice(0, 1).map((flag) => (
-                <span key={flag} className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-100">
-                  Note: {flag.length > 45 ? flag.slice(0, 43) + "…" : flag}
-                </span>
-              ))}
-            </div>
-          ) : null;
-        })()}
-
-        {/* spacer to push actions to bottom */}
+        {/* spacer */}
         <div className="flex-1" />
 
 
@@ -431,6 +484,287 @@ function SavedTray({ count, onClear }: { count: number; onClear: () => void }) {
   );
 }
 
+// ── FiltersModal ──────────────────────────────────────────────────────────────
+
+const AMENITY_TILES: { key: string; label: string; icon: React.ReactNode }[] = [
+  { key: "no-fee",     label: "No Fee",     icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9H9.5a2.5 2.5 0 0 0 0 5h5a2.5 2.5 0 0 1 0 5H9"/><line x1="12" y1="6" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="18"/></svg> },
+  { key: "laundry",   label: "Laundry",    icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="12" cy="13" r="4"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="9" y1="6" x2="9.01" y2="6"/></svg> },
+  { key: "gym",       label: "Gym",        icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 6.5h11m-11 11h11M6.5 6.5v11m11-11v11M3 9h3m-3 6h3m15-6h-3m3 6h-3"/></svg> },
+  { key: "doorman",   label: "Doorman",    icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18M3 7v14m18-14v14"/><path d="M9 21V11h6v10"/><path d="M12 3a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/><path d="M9 7l3-4 3 4"/></svg> },
+  { key: "elevator",  label: "Elevator",   icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="2" width="18" height="20" rx="2"/><line x1="12" y1="2" x2="12" y2="22"/><path d="M8 8l-2 2 2 2"/><path d="M16 12l2-2-2-2"/></svg> },
+  { key: "pets",      label: "Pets OK",    icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><path d="M12 18c-4 0-7-2-7-6 0-2.5 2-5 5-5s7 2.5 7 5c0 4-3 6-5 6z"/></svg> },
+  { key: "outdoor",   label: "Outdoor",    icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 22V12l9-9 9 9v10"/><path d="M9 22V16h6v6"/></svg> },
+  { key: "dishwasher",label: "Dishwasher", icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="3"/><circle cx="12" cy="13" r="5"/><line x1="12" y1="8" x2="12" y2="10"/><circle cx="12" cy="13" r="1" fill="currentColor"/></svg> },
+];
+
+function FiltersModal({
+  placeType, setPlaceType,
+  minBeds, setMinBeds,
+  minBaths, setMinBaths,
+  minPrice, setMinPrice,
+  maxPrice, setMaxPrice,
+  amenityFilters, toggleAmenity,
+  prices,
+  total,
+  onClearAll,
+  onClose,
+}: {
+  placeType: "any" | "room" | "entire"; setPlaceType: (v: "any" | "room" | "entire") => void;
+  minBeds: number | null; setMinBeds: (v: number | null) => void;
+  minBaths: number | null; setMinBaths: (v: number | null) => void;
+  minPrice: string; setMinPrice: (v: string) => void;
+  maxPrice: string; setMaxPrice: (v: string) => void;
+  amenityFilters: Set<string>; toggleAmenity: (key: string) => void;
+  prices: number[];
+  total: number;
+  onClearAll: () => void;
+  onClose: () => void;
+}) {
+  const hasFilters = placeType !== "any" || minBeds !== null || minBaths !== null || !!minPrice || !!maxPrice || amenityFilters.size > 0;
+
+  // Price histogram — computed once from prices prop
+  const NUM_BUCKETS = 28;
+  const validPrices = prices.filter(p => p > 0);
+  const absMax = validPrices.length > 0 ? Math.ceil(Math.max(...validPrices) / 500) * 500 : 10000;
+  const currentMin = Math.max(0, Math.min(Number(minPrice) || 0, absMax));
+  const currentMax = Math.max(0, Math.min(Number(maxPrice) || absMax, absMax));
+  const bucketSize = absMax / NUM_BUCKETS;
+  const buckets = Array.from({ length: NUM_BUCKETS }, (_, i) => {
+    const lo = i * bucketSize, hi = lo + bucketSize;
+    return validPrices.filter(p => p >= lo && p < hi).length;
+  });
+  const maxCount = Math.max(...buckets, 1);
+  const minPct = (currentMin / absMax) * 100;
+  const maxPct = (currentMax / absMax) * 100;
+
+  // Custom drag slider — stable refs avoid stale-closure lag
+  const trackRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef<"min" | "max" | null>(null);
+  const minValRef = useRef(currentMin);
+  const maxValRef = useRef(currentMax);
+  minValRef.current = currentMin;
+  maxValRef.current = currentMax;
+
+  const handleThumbDown = (thumb: "min" | "max") => (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    draggingRef.current = thumb;
+
+    const getX = (ev: MouseEvent | TouchEvent) =>
+      "touches" in ev ? ev.touches[0].clientX : ev.clientX;
+
+    const onMove = (ev: MouseEvent | TouchEvent) => {
+      if (!trackRef.current || !draggingRef.current) return;
+      const rect = trackRef.current.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (getX(ev) - rect.left) / rect.width));
+      const raw = Math.round((pct * absMax) / 50) * 50;
+      if (draggingRef.current === "min") {
+        const clamped = Math.min(raw, maxValRef.current - 50);
+        setMinPrice(clamped > 0 ? String(clamped) : "");
+      } else {
+        const clamped = Math.max(raw, minValRef.current + 50);
+        setMaxPrice(clamped < absMax ? String(clamped) : "");
+      }
+    };
+    const onUp = () => {
+      draggingRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove);
+    window.addEventListener("touchend", onUp);
+  };
+
+  const pillActive = "border-[var(--accent)] bg-[var(--accent)] text-white";
+  const pillInactive = "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)]";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[3px]" onClick={onClose} />
+      <div className="relative bg-[var(--card)] rounded-3xl shadow-2xl w-full max-w-[560px] max-h-[90vh] flex flex-col animate-slide-up">
+
+        {/* Header */}
+        <div className="flex items-center justify-center px-6 pt-5 pb-4 border-b border-[var(--border)] relative flex-shrink-0">
+          <h2 className="font-semibold text-[0.9rem] text-[var(--foreground)]">Filters</h2>
+          <button type="button" onClick={onClose}
+            className="absolute right-5 w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--surface)] transition-colors text-[var(--muted)] hover:text-[var(--foreground)]">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 scrollbar-thin">
+
+          {/* Type of place */}
+          <div className="px-6 py-6">
+            <h3 className="font-semibold text-[0.9rem] text-[var(--foreground)] mb-1">Type of place</h3>
+            <p className="text-[12.5px] text-[var(--muted)] mb-4">Search for a room or an entire home</p>
+            <div className="flex rounded-xl border border-[var(--border)] overflow-hidden">
+              {(["any", "room", "entire"] as const).map((type) => {
+                const label = type === "any" ? "Any type" : type === "room" ? "Room" : "Entire home";
+                const active = placeType === type;
+                return (
+                  <button key={type} type="button" onClick={() => setPlaceType(type)}
+                    className={`flex-1 py-3 text-sm font-medium transition-all border-r last:border-r-0 border-[var(--border)] ${
+                      active ? "bg-[var(--accent)] text-white" : "text-[var(--muted)] hover:bg-[var(--accent-light)] hover:text-[var(--accent)]"
+                    }`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)]" />
+
+          {/* Price range */}
+          <div className="px-6 py-6">
+            <h3 className="font-semibold text-[0.9rem] text-[var(--foreground)] mb-1">Price range</h3>
+            <p className="text-[12.5px] text-[var(--muted)] mb-5">Per month</p>
+
+            {/* Histogram + slider combined */}
+            <div className="relative select-none">
+              {/* Bars */}
+              <div className="flex items-end gap-px h-24">
+                {buckets.map((count, i) => {
+                  const lo = i * bucketSize, hi = lo + bucketSize;
+                  const inRange = hi > currentMin && lo < currentMax;
+                  return (
+                    <div key={i} className="flex-1 rounded-t-[2px]"
+                      style={{
+                        height: `${count > 0 ? Math.max((count / maxCount) * 100, 5) : 0}%`,
+                        background: inRange ? "var(--accent)" : "#E3DDD5",
+                        transition: "background 0.1s",
+                      }} />
+                  );
+                })}
+              </div>
+
+              {/* Track */}
+              <div ref={trackRef} className="relative h-1 mx-0 cursor-pointer">
+                <div className="absolute inset-0 bg-[var(--border)] rounded-full" />
+                <div className="absolute top-0 h-full rounded-full"
+                  style={{ left: `${minPct}%`, right: `${100 - maxPct}%`, background: "var(--accent)" }} />
+
+                {/* Min thumb */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full shadow-[0_2px_12px_rgba(0,0,0,0.18)] border border-[#D0C9C0] cursor-grab active:cursor-grabbing"
+                  style={{ left: `calc(${minPct}% - 12px)`, zIndex: 3, touchAction: "none" }}
+                  onMouseDown={handleThumbDown("min")}
+                  onTouchStart={handleThumbDown("min")}
+                />
+                {/* Max thumb */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-full shadow-[0_2px_12px_rgba(0,0,0,0.18)] border border-[#D0C9C0] cursor-grab active:cursor-grabbing"
+                  style={{ left: `calc(${maxPct}% - 12px)`, zIndex: 3, touchAction: "none" }}
+                  onMouseDown={handleThumbDown("max")}
+                  onTouchStart={handleThumbDown("max")}
+                />
+              </div>
+            </div>
+
+            {/* Min / Max text inputs */}
+            <div className="flex items-end gap-3 mt-6">
+              <div className="flex-1">
+                <label className="block text-[11px] text-[var(--muted)] mb-1.5">Minimum</label>
+                <div className="flex items-center gap-1 border border-[var(--border)] rounded-2xl px-4 py-3 focus-within:border-[var(--accent)] transition-colors bg-[var(--surface)]">
+                  <span className="text-sm text-[var(--muted)]">$</span>
+                  <input type="number" placeholder="0" value={minPrice} onChange={(e) => setMinPrice(e.target.value)}
+                    className="flex-1 text-sm bg-transparent text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none min-w-0" />
+                </div>
+              </div>
+              <span className="text-[var(--border)] pb-3.5 shrink-0">—</span>
+              <div className="flex-1">
+                <label className="block text-[11px] text-[var(--muted)] mb-1.5">Maximum</label>
+                <div className="flex items-center gap-1 border border-[var(--border)] rounded-2xl px-4 py-3 focus-within:border-[var(--accent)] transition-colors bg-[var(--surface)]">
+                  <span className="text-sm text-[var(--muted)]">$</span>
+                  <input type="number" placeholder="Any" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)}
+                    className="flex-1 text-sm bg-transparent text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none min-w-0" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)]" />
+
+          {/* Bedrooms */}
+          <div className="px-6 py-6">
+            <h3 className="font-semibold text-[0.9rem] text-[var(--foreground)] mb-4">Bedrooms</h3>
+            <div className="flex gap-2">
+              {([null, 0, 1, 2, 3, 4] as (number | null)[]).map((v) => {
+                const label = v === null ? "Any" : v === 0 ? "Studio" : v === 4 ? "4+" : `${v}`;
+                return (
+                  <button key={label} type="button" onClick={() => setMinBeds(v)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${minBeds === v ? pillActive : pillInactive}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)]" />
+
+          {/* Bathrooms */}
+          <div className="px-6 py-6">
+            <h3 className="font-semibold text-[0.9rem] text-[var(--foreground)] mb-4">Bathrooms</h3>
+            <div className="flex gap-2">
+              {([null, 1, 2, 3] as (number | null)[]).map((v) => {
+                const label = v === null ? "Any" : v === 3 ? "3+" : `${v}`;
+                return (
+                  <button key={label} type="button" onClick={() => setMinBaths(v)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all ${minBaths === v ? pillActive : pillInactive}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)]" />
+
+          {/* Amenities */}
+          <div className="px-6 py-6">
+            <h3 className="font-semibold text-[0.9rem] text-[var(--foreground)] mb-4">Amenities</h3>
+            <div className="grid grid-cols-4 gap-3">
+              {AMENITY_TILES.map(({ key, label, icon }) => {
+                const active = amenityFilters.has(key);
+                return (
+                  <button key={key} type="button" onClick={() => toggleAmenity(key)}
+                    className={`flex flex-col items-start gap-2.5 p-3.5 rounded-2xl border transition-all text-left ${
+                      active ? "border-[var(--accent)] bg-[var(--accent-light)]" : "border-[var(--border)] hover:border-[var(--accent)]/40"
+                    }`}>
+                    <span className={active ? "text-[var(--accent)]" : "text-[var(--muted)]"}>{icon}</span>
+                    <span className={`text-[11.5px] font-medium leading-tight ${active ? "text-[var(--accent)]" : "text-[var(--muted)]"}`}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--border)] flex-shrink-0">
+          <button type="button" onClick={onClearAll}
+            className={`text-sm font-medium underline underline-offset-2 transition-colors ${
+              hasFilters ? "text-[var(--foreground)] hover:text-[var(--muted)]" : "text-[var(--muted-light)] cursor-default"
+            }`}>
+            Clear all
+          </button>
+          <button type="button" onClick={onClose}
+            className="px-6 py-3 bg-[var(--accent)] text-white text-sm font-semibold rounded-2xl hover:bg-[var(--accent-hover)] transition-colors">
+            Show {total.toLocaleString()} listing{total !== 1 ? "s" : ""}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── ListingsPage ──────────────────────────────────────────────────────────────
 
 const PROMPT_CHIPS = [
@@ -465,10 +799,21 @@ export function ListingsPage() {
   const [selectedNeighborhoods, setSelectedNeighborhoods] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<SortMode>("match");
   const [showFilters, setShowFilters] = useState(false);
+  const [placeType, setPlaceType] = useState<"any" | "room" | "entire">("any");
   const [minBeds, setMinBeds] = useState<number | null>(null); // null=any, 0=studio, 1,2,3,4
   const [minBaths, setMinBaths] = useState<number | null>(null); // null=any, 1, 2
+  const [amenityFilters, setAmenityFilters] = useState<Set<string>>(new Set());
   const [showInsight, setShowInsight] = useState(true);
   const [inputFocused, setInputFocused] = useState(false);
+
+  // ── AI Search state ──────────────────────────────────────────────────────────
+  const [isAiMode, setIsAiMode] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResults, setAiResults] = useState<Listing[] | null>(null);
+  const [aiScrapeTriggered, setAiScrapeTriggered] = useState(false);
+  const [aiRunId, setAiRunId] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiScrapeComplete, setAiScrapeComplete] = useState(false);
 
   useEffect(() => {
     fetch("/api/sources").then((r) => r.json()).then(setSources).catch(console.error);
@@ -477,7 +822,7 @@ export function ListingsPage() {
   useEffect(() => {
     setLoading(true);
     setLimit(50);
-  }, [mode, q, source, minPrice, maxPrice]);
+  }, [mode, source]);
 
   useEffect(() => {
     if (mode === "recommended") {
@@ -492,10 +837,7 @@ export function ListingsPage() {
         .finally(() => { setLoading(false); setLoadingMore(false); });
     } else {
       const params = new URLSearchParams();
-      if (q) params.set("q", q);
       if (source) params.set("source", source);
-      if (minPrice) params.set("minPrice", minPrice);
-      if (maxPrice) params.set("maxPrice", maxPrice);
       params.set("limit", String(limit));
       fetch(`/api/listings?${params}`)
         .then((r) => r.json())
@@ -506,7 +848,7 @@ export function ListingsPage() {
         .catch(console.error)
         .finally(() => { setLoading(false); setLoadingMore(false); });
     }
-  }, [mode, q, source, minPrice, maxPrice, limit]);
+  }, [mode, source, limit]);
 
   const handleNeighborhoodToggle = useCallback((ntaname: string) => {
     setSelectedNeighborhoods((prev) => {
@@ -524,6 +866,44 @@ export function ListingsPage() {
     });
   }, []);
 
+  const handleAiSearch = useCallback(async (prompt: string) => {
+    if (!prompt.trim()) return;
+    setIsAiMode(true);
+    setAiLoading(true);
+    setAiResults(null);
+    setAiScrapeTriggered(false);
+    setAiRunId(null);
+    setAiScrapeComplete(false);
+    setAiSummary(null);
+    try {
+      const res = await fetch("/api/ai-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data: AiSearchResult = await res.json();
+      setAiResults(data.listings ?? []);
+      setAiSummary(data.summary ?? null);
+      setAiScrapeTriggered(data.scrapeTriggered ?? false);
+      setAiRunId(data.runId ?? null);
+    } catch (e) {
+      console.error(e);
+      setAiResults([]);
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
+
+  // Auto-refresh AI results 35 seconds after a scrape is triggered
+  useEffect(() => {
+    if (!aiScrapeTriggered || aiScrapeComplete || !q.trim()) return;
+    const timer = setTimeout(() => {
+      setAiScrapeComplete(true);
+      handleAiSearch(q);
+    }, 35000);
+    return () => clearTimeout(timer);
+  }, [aiScrapeTriggered, aiScrapeComplete, handleAiSearch, q]);
+
   // When a map pin is hovered, scroll the corresponding card into view
   useEffect(() => {
     if (!hoveredListingId || hoverSourceRef.current !== "map") return;
@@ -534,6 +914,11 @@ export function ListingsPage() {
   // Apply client-side filters
   const neighborhoodFiltered = listings
     .filter((l) => !hiddenIds.has(l.id))
+    .filter((l) => {
+      if (placeType === "any") return true;
+      const isRoom = l.title?.toLowerCase().includes("room") || l.address?.toLowerCase().includes("room");
+      return placeType === "room" ? !!isRoom : !isRoom;
+    })
     .filter((l) => {
       if (selectedNeighborhoods.size === 0) return true;
       return [...selectedNeighborhoods].some((nta) =>
@@ -550,7 +935,39 @@ export function ListingsPage() {
     .filter((l) => {
       if (minBaths === null) return true;
       return (l.baths ?? 0) >= minBaths;
+    })
+    .filter((l) => {
+      if (!minPrice && !maxPrice) return true;
+      const p = l.price ?? 0;
+      if (minPrice && p < Number(minPrice)) return false;
+      if (maxPrice && p > Number(maxPrice)) return false;
+      return true;
+    })
+    .filter((l) => {
+      if (amenityFilters.size === 0) return true;
+      const amen = (l.amenities ?? "").toLowerCase();
+      return [...amenityFilters].every((key) => {
+        switch (key) {
+          case "no-fee":      return amen.includes("no fee") || amen.includes("no broker fee");
+          case "laundry":     return amen.includes("laundry") || amen.includes("washer");
+          case "gym":         return amen.includes("gym") || amen.includes("fitness");
+          case "doorman":     return amen.includes("doorman");
+          case "elevator":    return amen.includes("elevator");
+          case "pets":        return amen.includes("pet");
+          case "outdoor":     return amen.includes("outdoor") || amen.includes("terrace") || amen.includes("balcony") || amen.includes("garden");
+          case "dishwasher":  return amen.includes("dishwasher");
+          default:            return true;
+        }
+      });
     });
+
+  const toggleAmenity = useCallback((key: string) => {
+    setAmenityFilters((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }, []);
 
   // Apply client-side sort
   const visibleListings = [...neighborhoodFiltered].sort((a, b) => {
@@ -565,7 +982,8 @@ export function ListingsPage() {
 
   const hasMore = mode === "search" && listings.length < total;
 
-  const mapListings = listings
+  const activeListings = isAiMode && aiResults ? aiResults : listings;
+  const mapListings = activeListings
     .filter((l) => l.latitude != null && l.longitude != null)
     .map((l) => ({
       id: l.id,
@@ -654,263 +1072,123 @@ export function ListingsPage() {
     <>
       <div className="flex h-[calc(100vh-56px)]">
         {/* LEFT: scrollable listings panel */}
-        <div className="w-full md:w-[54%] overflow-y-auto flex-shrink-0 border-r border-[var(--border)]">
-          <div className="px-5 pt-6 pb-8">
-
-            {/* ── Mode toggle (small, top) ── */}
-            <div className="flex items-center justify-between mb-5">
-              <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5 bg-[var(--surface)]">
-                <button type="button" onClick={() => setMode("recommended")}
-                  className="px-3.5 py-1.5 text-xs font-medium rounded-md transition-colors text-[var(--muted)] hover:text-[var(--foreground)]">
-                  For You
-                </button>
-                <button type="button" onClick={() => setMode("search")}
-                  className="px-3.5 py-1.5 text-xs font-medium rounded-md transition-colors bg-[var(--card)] text-[var(--foreground)] shadow-sm">
-                  Search
-                </button>
-              </div>
-              <p className="text-xs text-[var(--muted)]">
-                {loading ? "Loading…" : `${visibleListings.length.toLocaleString()} listings`}
-              </p>
-            </div>
+        <div className="w-full md:w-1/2 overflow-y-auto flex-shrink-0 scrollbar-hide">
+          <div className="pl-14 pr-5 pt-6 pb-8">
 
             {/* ── AI Hero Search ── */}
-            <div className="mb-5">
-              <h2 className="font-serif text-[1.45rem] font-semibold text-[var(--foreground)] text-center mb-3 leading-snug">
-                Tell Hunter what you're looking for…
+            <div className="mb-6">
+              <h2 className="font-serif text-[2.1rem] font-semibold text-[var(--foreground)] mb-5 leading-tight tracking-tight">
+                Find your next home.
               </h2>
 
               {/* Search input */}
-              <div className={`relative flex items-center bg-[var(--card)] border-2 rounded-xl shadow-sm transition-all duration-200 ${
-                inputFocused ? "border-[var(--accent)] shadow-[0_0_0_3px_rgba(194,125,58,0.12)]" : "border-[var(--border)]"
+              <div className={`relative flex items-center bg-[var(--card)] border rounded-2xl transition-all duration-300 ${
+                inputFocused
+                  ? "border-[var(--accent)]/60 shadow-[0_0_0_4px_rgba(232,113,74,0.08),0_4px_24px_rgba(0,0,0,0.07)]"
+                  : "border-[var(--border)] shadow-[0_2px_16px_rgba(0,0,0,0.05)]"
               }`}>
-                <svg className="absolute left-4 text-[var(--muted-light)] shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
+                {/* Left icon */}
+                <div className="absolute left-4 pointer-events-none">
+                  {aiLoading ? (
+                    <svg className="animate-spin text-[var(--accent)]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" strokeOpacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
+                  ) : isAiMode ? (
+                    <svg className="text-[var(--accent)]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                    </svg>
+                  ) : (
+                    <svg className="text-[var(--muted-light)]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                  )}
+                </div>
+
                 <input
                   type="text"
                   placeholder="2BR under $3,500 near Central Park…"
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    if (isAiMode) { setIsAiMode(false); setAiResults(null); }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && q.trim()) handleAiSearch(q.trim());
+                  }}
                   onFocus={() => setInputFocused(true)}
                   onBlur={() => setInputFocused(false)}
-                  className="w-full pl-10 pr-4 py-3 text-sm bg-transparent text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none rounded-xl"
+                  className="w-full pl-11 pr-14 py-4 text-[0.875rem] bg-transparent text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none rounded-2xl"
                 />
-                {q && (
-                  <button type="button" onClick={() => setQ("")}
-                    className="absolute right-3 text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                  </button>
-                )}
+
+                {/* Right: clear button or ↵ hint */}
+                <div className="absolute right-3.5">
+                  {q ? (
+                    <button
+                      type="button"
+                      onClick={() => { setQ(""); setIsAiMode(false); setAiResults(null); }}
+                      className="text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors p-1 rounded-lg hover:bg-[var(--surface)]"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-[var(--muted-light)] border border-[var(--border)] rounded-md px-1.5 py-0.5 font-medium pointer-events-none select-none">↵</span>
+                  )}
+                </div>
               </div>
 
               {/* Prompt chips */}
-              <div className="flex flex-wrap gap-2 mt-2.5">
+              <div className="flex flex-wrap gap-2 mt-3">
                 {PROMPT_CHIPS.map((chip) => (
                   <button
                     key={chip}
                     type="button"
-                    onClick={() => setQ(chip)}
-                    className="flex items-center gap-1 text-[11px] text-[var(--muted)] border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 rounded-full hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                    onClick={() => { setQ(chip); handleAiSearch(chip); }}
+                    className="text-[11px] text-[var(--muted)] border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 rounded-full hover:bg-[var(--accent-light)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] transition-all duration-150"
                   >
                     {chip}
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* ── Filters (collapsible) ── */}
-            {(() => {
-              const activeCount = [minBeds !== null, minBaths !== null, !!minPrice || !!maxPrice].filter(Boolean).length;
-              const bedOptions = [
-                { label: "Any", value: null },
-                { label: "Studio", value: 0 },
-                { label: "1", value: 1 },
-                { label: "2", value: 2 },
-                { label: "3", value: 3 },
-                { label: "4+", value: 4 },
-              ];
-              const bathOptions = [
-                { label: "Any", value: null },
-                { label: "1+", value: 1 },
-                { label: "2+", value: 2 },
-                { label: "3+", value: 3 },
-              ];
-              return (
-                <div className="mb-5">
-                  {/* Toggle button */}
-                  <button
-                    type="button"
-                    onClick={() => setShowFilters((v) => !v)}
-                    className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-medium transition-all duration-150 ${
-                      showFilters || activeCount > 0
-                        ? "bg-[var(--accent-light)] border-[var(--accent)]/40 text-[var(--accent)]"
-                        : "bg-[var(--card)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
-                    }`}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="11" y1="18" x2="13" y2="18" />
-                    </svg>
-                    Filters
-                    {activeCount > 0 && (
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-[var(--accent)] text-white text-[9px] font-bold leading-none">
-                        {activeCount}
-                      </span>
-                    )}
-                    <svg
-                      width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                      className={`transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
-                    >
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </button>
 
-                  {/* Panel */}
-                  {showFilters && (
-                    <div className="mt-2.5 bg-[var(--card)] border border-[var(--border)] rounded-2xl overflow-hidden shadow-sm animate-fade-in">
-
-                      {/* Beds + Baths — side by side */}
-                      <div className="grid grid-cols-2 divide-x divide-[var(--border)]">
-
-                        {/* Bedrooms */}
-                        <div className="p-4">
-                          <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Bedrooms</p>
-                          <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
-                            {bedOptions.map(({ label, value }, i) => (
-                              <button
-                                key={label}
-                                type="button"
-                                onClick={() => setMinBeds(value)}
-                                className={`flex-1 py-2 text-[11px] font-medium transition-all duration-150 ${
-                                  i < bedOptions.length - 1 ? "border-r border-[var(--border)]" : ""
-                                } ${
-                                  minBeds === value
-                                    ? "bg-[var(--accent)] text-white"
-                                    : "bg-transparent text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Bathrooms */}
-                        <div className="p-4">
-                          <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Bathrooms</p>
-                          <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
-                            {bathOptions.map(({ label, value }, i) => (
-                              <button
-                                key={label}
-                                type="button"
-                                onClick={() => setMinBaths(value)}
-                                className={`flex-1 py-2 text-[11px] font-medium transition-all duration-150 ${
-                                  i < bathOptions.length - 1 ? "border-r border-[var(--border)]" : ""
-                                } ${
-                                  minBaths === value
-                                    ? "bg-[var(--accent)] text-white"
-                                    : "bg-transparent text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
-                                }`}
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Divider */}
-                      <div className="h-px bg-[var(--border)]" />
-
-                      {/* Price range */}
-                      <div className="p-4">
-                        <p className="text-[10px] font-semibold text-[var(--muted)] uppercase tracking-widest mb-3">Monthly rent</p>
-                        <div className="flex items-center gap-3">
-                          <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--muted-light)] select-none pointer-events-none">$</span>
-                            <input
-                              type="number"
-                              placeholder="No min"
-                              value={minPrice}
-                              onChange={(e) => setMinPrice(e.target.value)}
-                              className="w-full pl-6 pr-3 py-2.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40 focus:border-[var(--accent)] transition"
-                            />
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <div className="w-3 h-px bg-[var(--border)]" />
-                          </div>
-                          <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--muted-light)] select-none pointer-events-none">$</span>
-                            <input
-                              type="number"
-                              placeholder="No max"
-                              value={maxPrice}
-                              onChange={(e) => setMaxPrice(e.target.value)}
-                              className="w-full pl-6 pr-3 py-2.5 text-sm border border-[var(--border)] rounded-lg bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40 focus:border-[var(--accent)] transition"
-                            />
-                          </div>
-                          {(minPrice || maxPrice) && (
-                            <button
-                              type="button"
-                              onClick={() => { setMinPrice(""); setMaxPrice(""); }}
-                              className="shrink-0 text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors"
-                              aria-label="Clear price"
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Footer: reset */}
-                      {activeCount > 0 && (
-                        <>
-                          <div className="h-px bg-[var(--border)]" />
-                          <div className="px-4 py-2.5 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => { setMinBeds(null); setMinBaths(null); setMinPrice(""); setMaxPrice(""); }}
-                              className="text-[11px] text-[var(--muted)] hover:text-[var(--accent)] transition-colors font-medium"
-                            >
-                              Reset filters
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {/* ── Preference summary bar ── */}
-            {prefChips.length > 0 && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 px-4 py-2.5 bg-[var(--card)] border border-[var(--border)] rounded-xl text-xs text-[var(--muted)]">
-                {prefChips.map((chip, i) => (
-                  <span key={chip} className="flex items-center gap-3">
-                    {i > 0 && <span className="text-[var(--border)]">|</span>}
-                    {chip}
-                  </span>
-                ))}
-                <button type="button" onClick={() => { setMinPrice(""); setMaxPrice(""); setSource(""); setMinBeds(null); setMinBaths(null); setSelectedNeighborhoods(new Set()); }}
-                  className="ml-auto text-[var(--muted-light)] hover:text-[var(--muted)] transition-colors text-[10px]">
-                  Clear ×
-                </button>
+            {/* ── AI searching banner ── */}
+            {aiLoading && (
+              <div className="flex items-center gap-3 px-4 py-3 mb-4 bg-[var(--accent-light)] border border-[var(--accent)]/20 rounded-xl">
+                <svg className="animate-spin shrink-0 text-[var(--accent)]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+                <span className="text-xs font-medium text-[var(--accent)]">Hunter is searching for your perfect apartment…</span>
               </div>
             )}
 
-            {/* ── AI summary + sort chips ── */}
+            {/* ── Scrape in-progress banner ── */}
+            {isAiMode && aiScrapeTriggered && !aiScrapeComplete && !aiLoading && (
+              <div className="flex items-center gap-3 px-4 py-3 mb-4 bg-[var(--card)] border border-[var(--border)] rounded-xl">
+                <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse shrink-0" />
+                <span className="text-xs text-[var(--muted)]">
+                  Hunter is finding more listings from StreetEasy — refreshing shortly…
+                </span>
+              </div>
+            )}
+
+            {/* ── AI result header / regular result count ── */}
             <div className="mb-4">
-              {!loading && visibleListings.length > 0 && (
+              {isAiMode && aiSummary && !aiLoading ? (
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--accent)]">Hunter AI</span>
+                    {(aiResults?.length ?? 0) > 0 && (
+                      <span className="text-[10px] text-[var(--muted-light)]">· {aiResults!.length} match{aiResults!.length !== 1 ? "es" : ""}</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-[var(--foreground)] leading-relaxed">{aiSummary}</p>
+                </div>
+              ) : !loading && !isAiMode && visibleListings.length > 0 ? (
                 <p className="text-sm text-[var(--foreground)] mb-3 leading-relaxed">
-                  I found{" "}
-                  <strong>{visibleListings.length.toLocaleString()}</strong> apartments.
-                  {visibleListings.length > 3 && " Here are the "}
-                  {visibleListings.length > 3 && <strong>top picks</strong>}
-                  {visibleListings.length > 3 && " for your search."}
+                  Found{" "}
+                  <strong>{visibleListings.length.toLocaleString()}</strong> apartments{visibleListings.length > 3 ? " — here are the top picks." : "."}
                 </p>
-              )}
+              ) : null}
               <div className="flex items-center gap-2 flex-wrap">
                 {SORT_OPTIONS.map(({ key, label }) => (
                   <button
@@ -926,6 +1204,27 @@ export function ListingsPage() {
                     {label}
                   </button>
                 ))}
+
+                {/* Filters button */}
+                {(() => {
+                  const fc = [placeType !== "any", minBeds !== null, minBaths !== null, !!minPrice || !!maxPrice, amenityFilters.size > 0].filter(Boolean).length;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setShowFilters(true)}
+                      className={`ml-1 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                        fc > 0
+                          ? "bg-[var(--foreground)] text-[var(--card)] border-[var(--foreground)]"
+                          : "bg-[var(--card)] text-[var(--muted)] border-[var(--border)] hover:border-[var(--foreground)] hover:text-[var(--foreground)]"
+                      }`}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/>
+                      </svg>
+                      Filters{fc > 0 ? ` · ${fc}` : ""}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
 
@@ -946,8 +1245,48 @@ export function ListingsPage() {
             )}
 
             {/* ── Listing grid ── */}
-            {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {aiLoading ? (
+              // AI loading skeleton
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] overflow-hidden animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>
+                    <div className="bg-[var(--surface)]" style={{ aspectRatio: "16/10" }} />
+                    <div className="p-4 space-y-3">
+                      <div className="h-4 bg-[var(--surface)] rounded w-3/4" />
+                      <div className="h-3 bg-[var(--surface)] rounded w-1/2" />
+                      <div className="h-3 bg-[var(--surface)] rounded w-2/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : isAiMode && aiResults !== null ? (
+              // AI search results
+              aiResults.length === 0 ? (
+                <div className="text-center py-20">
+                  <p className="font-serif text-2xl text-[var(--muted)] mb-2">No matches found</p>
+                  <p className="text-xs text-[var(--muted-light)]">Hunter is searching for more — check back in a moment</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {aiResults.map((l, i) => (
+                    <div key={l.id} ref={(el) => { if (el) cardRefsMap.current.set(l.id, el); else cardRefsMap.current.delete(l.id); }}>
+                      <ListingCard
+                        listing={l}
+                        index={i}
+                        compact
+                        isAiResult
+                        isSaved={savedIds.has(l.id)}
+                        onSaveToggle={handleSaveToggle}
+                        isHovered={hoveredListingId === l.id}
+                        onHoverChange={(h) => { hoverSourceRef.current = "card"; setHoveredListingId(h ? l.id : null); }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : loading ? (
+              // Regular loading skeleton
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] overflow-hidden animate-pulse">
                     <div className="bg-[var(--surface)]" style={{ aspectRatio: "16/10" }} />
@@ -966,7 +1305,7 @@ export function ListingsPage() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   {visibleListings.map((l, i) => (
                     <div key={l.id} ref={(el) => { if (el) cardRefsMap.current.set(l.id, el); else cardRefsMap.current.delete(l.id); }}>
                     <ListingCard
@@ -995,19 +1334,37 @@ export function ListingsPage() {
           </div>
         </div>
 
-        {/* RIGHT: map panel */}
-        <div className="hidden md:block flex-1 relative">
-          <MapView
-            listings={mapListings}
-            hoveredListingId={hoveredListingId}
-            selectedNeighborhoods={selectedNeighborhoods}
-            onNeighborhoodToggle={handleNeighborhoodToggle}
-            onPinHover={(id) => { hoverSourceRef.current = "map"; setHoveredListingId(id); }}
-            onPinClick={(id) => { window.location.href = `/listings/${id}`; }}
-          />
-          {showInsight && <MapInsightCard onClose={() => setShowInsight(false)} />}
+        {/* RIGHT: map */}
+        <div className="hidden md:flex flex-1 pt-6 pl-8 pr-14 pb-8">
+          <div className="relative flex-1 rounded-2xl overflow-hidden border border-[var(--border)] shadow-md">
+            <MapView
+              listings={mapListings}
+              hoveredListingId={hoveredListingId}
+              selectedNeighborhoods={selectedNeighborhoods}
+              onNeighborhoodToggle={handleNeighborhoodToggle}
+              onPinHover={(id) => { hoverSourceRef.current = "map"; setHoveredListingId(id); }}
+              onPinClick={(id) => { window.location.href = `/listings/${id}`; }}
+            />
+            {showInsight && <MapInsightCard onClose={() => setShowInsight(false)} />}
+          </div>
         </div>
       </div>
+
+      {/* ── Filters modal ── */}
+      {showFilters && (
+        <FiltersModal
+          placeType={placeType} setPlaceType={setPlaceType}
+          minBeds={minBeds} setMinBeds={setMinBeds}
+          minBaths={minBaths} setMinBaths={setMinBaths}
+          minPrice={minPrice} setMinPrice={setMinPrice}
+          maxPrice={maxPrice} setMaxPrice={setMaxPrice}
+          amenityFilters={amenityFilters} toggleAmenity={toggleAmenity}
+          prices={listings.map(l => l.price).filter((p): p is number => p !== null)}
+          total={visibleListings.length}
+          onClearAll={() => { setPlaceType("any"); setMinBeds(null); setMinBaths(null); setMinPrice(""); setMaxPrice(""); setAmenityFilters(new Set()); }}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
 
       {/* ── Sticky saved tray ── */}
       {savedIds.size > 0 && (

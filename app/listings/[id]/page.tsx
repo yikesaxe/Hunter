@@ -148,7 +148,13 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
     try { return JSON.parse(listing.photos); } catch { return []; }
   })();
   const cssAmenities: string[] = (() => {
-    try { return JSON.parse(listing.amenities); } catch { return []; }
+    try {
+      const parsed = JSON.parse(listing.amenities);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((a) =>
+        typeof a === "string" ? a : (a as Record<string, unknown>)?.name?.toString() ?? ""
+      ).filter(Boolean);
+    } catch { return []; }
   })();
 
   // ── Parse scrapedExtras ─────────────────────────────────────────────────
@@ -157,8 +163,14 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
       ? (listing.scrapedExtras as Record<string, unknown>)
       : {};
 
-  const homeFeatures: string[] = Array.isArray(extras.homeFeatures) ? (extras.homeFeatures as string[]) : [];
-  const buildingAmenities: string[] = Array.isArray(extras.buildingAmenities) ? (extras.buildingAmenities as string[]) : [];
+  const toStringArr = (arr: unknown): string[] => {
+    if (!Array.isArray(arr)) return [];
+    return arr.map((item) =>
+      typeof item === "string" ? item : (item as Record<string, unknown>)?.name?.toString() ?? ""
+    ).filter(Boolean);
+  };
+  const homeFeatures: string[] = toStringArr(extras.homeFeatures);
+  const buildingAmenities: string[] = toStringArr(extras.buildingAmenities);
   const transit: TransitStop[] = Array.isArray(extras.transit) ? (extras.transit as TransitStop[]) : [];
   const schools: School[] = Array.isArray(extras.schools) ? (extras.schools as School[]) : [];
   const fees = extras.fees as Fees | undefined;
@@ -172,7 +184,14 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
 
   // Broker — merge DB fields with extras
   const contactName = listing.brokerName ?? brokerExtras?.name ?? null;
-  const contactCompany = (extras.listedBy as string | undefined) ?? brokerExtras?.company ?? null;
+  const listedByRaw = extras.listedBy;
+  const listedByStr =
+    typeof listedByRaw === "string"
+      ? listedByRaw
+      : listedByRaw != null && typeof listedByRaw === "object"
+      ? ((listedByRaw as Record<string, unknown>).name as string | undefined) ?? null
+      : null;
+  const contactCompany = listedByStr ?? brokerExtras?.company ?? null;
   const contactEmail = listing.brokerEmail ?? brokerExtras?.email ?? null;
   const contactPhone = listing.brokerPhone ?? brokerExtras?.phone ?? null;
 

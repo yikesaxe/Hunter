@@ -3,7 +3,7 @@ import "dotenv/config";
 import { Queue } from "bullmq";
 import { connection } from "../scraper/src/queues.js";
 
-const QUEUES = ["crawl-index", "scrape-listing", "refresh-listing", "geocode-listing", "analyze-text"];
+const QUEUES = ["crawl-index", "scrape-listing", "refresh-listing", "geocode-listing", "analyze-text", "analyze-photos"];
 
 async function main() {
   for (const name of QUEUES) {

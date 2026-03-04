@@ -161,12 +161,12 @@ async function processScrapeListing(job: Job<ScrapeListingJobData>): Promise<voi
       }
     }
 
-    // ── Text analysis disabled — focusing on scraping improvements
-    // if (upsertResult.isNew || upsertResult.contentChanged) {
-    //   try {
-    //     await getAnalyzeTextQueue().add("analyze-text", { listingId: upsertResult.id });
-    //   } catch { /* non-blocking */ }
-    // }
+    // ── Text analysis: enqueue for new/changed listings
+    if (upsertResult.isNew || upsertResult.contentChanged) {
+      try {
+        await getAnalyzeTextQueue().add("analyze-text", { listingId: upsertResult.id });
+      } catch { /* non-blocking */ }
+    }
 
     // ── Photo analysis: enqueue when listing has photos and is new or changed
     if ((upsertResult.isNew || upsertResult.contentChanged) && parsed.photos.length > 0) {
