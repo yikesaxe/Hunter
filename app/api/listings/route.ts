@@ -148,15 +148,17 @@ export async function GET(req: NextRequest) {
         { neighborhood: { contains: q, mode: "insensitive" } },
         { description: { contains: q, mode: "insensitive" } },
         { borough: { contains: q, mode: "insensitive" } },
-        { sourceUrl: { contains: q, mode: "insensitive" } },
       ];
     }
-    if (source) where.source = source;
+    const VALID_SOURCES = new Set(["streeteasy", "renthop", "leasebreak", "zillow", "apartments.com"]);
+    if (source && VALID_SOURCES.has(source)) where.source = source;
     if (minPrice || maxPrice) {
       const priceFilter: { gte?: number; lte?: number } = {};
-      if (minPrice) priceFilter.gte = parseInt(minPrice, 10);
-      if (maxPrice) priceFilter.lte = parseInt(maxPrice, 10);
-      where.rentGross = priceFilter;
+      const parsedMin = parseInt(minPrice ?? "0", 10);
+      const parsedMax = parseInt(maxPrice ?? "0", 10);
+      if (minPrice && parsedMin >= 0 && parsedMin <= 50000) priceFilter.gte = parsedMin;
+      if (maxPrice && parsedMax >= 0 && parsedMax <= 50000) priceFilter.lte = parsedMax;
+      if (Object.keys(priceFilter).length > 0) where.rentGross = priceFilter;
     }
     if (neighborhood) where.neighborhood = { contains: neighborhood, mode: "insensitive" };
 

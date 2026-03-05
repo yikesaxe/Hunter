@@ -6,7 +6,7 @@
 // rebrowser-playwright re-exports playwright-core; TS may not see 'chromium' from the re-export
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { chromium } = require("rebrowser-playwright") as { chromium: import("playwright-core").BrowserType };
-import { writeFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 
 // Ensure debug + sessions dirs exist
@@ -242,6 +242,17 @@ const HEADLESS = process.env.SCRAPER_HEADLESS === "true";
 
 function getSessionPath(domain: string): string {
   return join(SESSIONS_DIR, `${domain}.json`);
+}
+
+/** Delete saved session for a domain — prevents Chrome crash on next retry with bad state. */
+function deleteSession(domain: string) {
+  try {
+    const path = getSessionPath(domain);
+    if (existsSync(path)) {
+      unlinkSync(path);
+      console.log(`  [session] Deleted bad session for ${domain}`);
+    }
+  } catch { /* fine */ }
 }
 
 async function renderPage(url: string, proxyUrl?: string): Promise<{
@@ -587,27 +598,34 @@ export async function fetchPage(url: string, forceRender = false): Promise<Fetch
   }
 
   if (forceRender) {
-    // Skip HTTP, go straight to rebrowser, then FlareSolverr if still blocked
-    const pwStart = Date.now();
-    const r = await renderPage(url, undefined);
-    playwrightTimeMs = Date.now() - pwStart;
-    html = r.html; statusCode = r.statusCode; finalUrl = r.finalUrl;
-    method = "rebrowser";
+    // Skip HTTP, go straight to rebrowser, then FlareSolverr if still blocked or crashed
+    let rebrowserOk = false;
+    try {
+      const pwStart = Date.now();
+      const r = await renderPage(url, undefined);
+      playwrightTimeMs = Date.now() - pwStart;
+      html = r.html; statusCode = r.statusCode; finalUrl = r.finalUrl;
+      method = "rebrowser";
+      rebrowserOk = !isBlockedOrThin(html, statusCode).blocked;
+      if (!rebrowserOk) {
+        // Delete the bad session — blocked sessions cause Chrome to crash on next retry
+        deleteSession(domain);
+        dumpDebug(url, html, statusCode, "rebrowser", r.responseHeaders);
+        console.log(`  rebrowser blocked, trying FlareSolverr...`);
+      }
+    } catch (e) {
+      // Delete session on crash too — it's likely corrupt
+      deleteSession(domain);
+      console.warn(`  rebrowser crashed (${e instanceof Error ? e.message : e}), falling back to FlareSolverr...`);
+    }
 
-    const blockCheck = isBlockedOrThin(html, statusCode);
-    if (blockCheck.blocked) {
-      dumpDebug(url, html, statusCode, "rebrowser", r.responseHeaders);
-      if (hasFlareSolverr) {
-        try {
-          console.log(`  rebrowser blocked (${blockCheck.reason}), trying FlareSolverr...`);
-          const fs = await fetchViaFlareSolverr(url);
-          html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
-          method = "FlareSolverr";
-        } catch (e) {
-          console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
-        }
-      } else {
-        console.warn(`  rebrowser blocked (${blockCheck.reason}) — page will return empty`);
+    if (!rebrowserOk && hasFlareSolverr) {
+      try {
+        const fs = await fetchViaFlareSolverr(url);
+        html = fs.html; statusCode = fs.statusCode; finalUrl = fs.finalUrl;
+        method = "FlareSolverr";
+      } catch (e) {
+        console.warn(`  FlareSolverr failed: ${e instanceof Error ? e.message : e}`);
       }
     }
   } else {
@@ -631,6 +649,7 @@ export async function fetchPage(url: string, forceRender = false): Promise<Fetch
       method = "rebrowser";
 
       if (isBlockedOrThin(html, statusCode).blocked) {
+        deleteSession(domain);
         dumpDebug(url, html, statusCode, "rebrowser", rendered.responseHeaders);
         if (hasFlareSolverr) {
           try {

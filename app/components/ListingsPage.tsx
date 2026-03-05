@@ -48,6 +48,7 @@ type AiSearchResult = {
   total: number;
   scrapeTriggered: boolean;
   runId: string | null;
+  runIds?: string[];
   summary: string;
 };
 
@@ -767,11 +768,6 @@ function FiltersModal({
 
 // ── ListingsPage ──────────────────────────────────────────────────────────────
 
-const PROMPT_CHIPS = [
-  "No fee, laundry, good for roommates",
-  "Find me the best deals in Williamsburg",
-  "Quiet 1BR near a park, pet-friendly",
-];
 
 const SORT_OPTIONS: { key: SortMode; label: string }[] = [
   { key: "match", label: "Best Match" },
@@ -805,6 +801,10 @@ export function ListingsPage() {
   const [amenityFilters, setAmenityFilters] = useState<Set<string>>(new Set());
   const [showInsight, setShowInsight] = useState(true);
   const [inputFocused, setInputFocused] = useState(false);
+  const [searchGlowing, setSearchGlowing] = useState(false);
+  const glowTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [promptIdx, setPromptIdx] = useState(0);
+  const [promptFading, setPromptFading] = useState(false);
 
   // ── AI Search state ──────────────────────────────────────────────────────────
   const [isAiMode, setIsAiMode] = useState(false);
@@ -850,6 +850,32 @@ export function ListingsPage() {
     }
   }, [mode, source, limit]);
 
+  // ── Rotating placeholder prompts ─────────────────────────────────────────────
+  const SEARCH_PROMPTS = [
+    "2BR under $3,500 near Central Park…",
+    "No-fee studio in Williamsburg…",
+    "Pet-friendly 1BR in Astoria under $2,800…",
+    "Good for roommates near the subway…",
+    "Sunny apartment with in-unit laundry…",
+    "Doorman building under $4,000 on the Upper West Side…",
+    "Flex 2BR near Prospect Park…",
+    "Large 1BR with home office space in LIC…",
+    "Quiet street, exposed brick, under $3,000…",
+    "High floor with natural light in Midtown…",
+  ];
+
+  useEffect(() => {
+    const cycle = setInterval(() => {
+      setPromptFading(true);
+      setTimeout(() => {
+        setPromptIdx((i) => (i + 1) % SEARCH_PROMPTS.length);
+        setPromptFading(false);
+      }, 350);
+    }, 3800);
+    return () => clearInterval(cycle);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleNeighborhoodToggle = useCallback((ntaname: string) => {
     setSelectedNeighborhoods((prev) => {
       const next = new Set(prev);
@@ -894,15 +920,24 @@ export function ListingsPage() {
     }
   }, []);
 
-  // Auto-refresh AI results 35 seconds after a scrape is triggered
+  // Auto-refresh AI results 35 seconds after a scrape is triggered (results-only, no new scrape)
   useEffect(() => {
     if (!aiScrapeTriggered || aiScrapeComplete || !q.trim()) return;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       setAiScrapeComplete(true);
-      handleAiSearch(q);
+      try {
+        const res = await fetch("/api/ai-search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: q, scrape: false }),
+        });
+        const data: AiSearchResult = await res.json();
+        setAiResults(data.listings ?? []);
+        setAiSummary(data.summary ?? null);
+      } catch { /* keep existing results */ }
     }, 35000);
     return () => clearTimeout(timer);
-  }, [aiScrapeTriggered, aiScrapeComplete, handleAiSearch, q]);
+  }, [aiScrapeTriggered, aiScrapeComplete, q]);
 
   // When a map pin is hovered, scroll the corresponding card into view
   useEffect(() => {
@@ -1070,10 +1105,10 @@ export function ListingsPage() {
   // ── Search mode: split view ─────────────────────────────────────────────────
   return (
     <>
-      <div className="flex h-[calc(100vh-56px)]">
+      <div className="flex h-[calc(100vh-64px)]">
         {/* LEFT: scrollable listings panel */}
-        <div className="w-full md:w-1/2 overflow-y-auto flex-shrink-0 scrollbar-hide">
-          <div className="pl-14 pr-5 pt-6 pb-8">
+        <div className="w-full md:w-1/2 overflow-y-auto flex-shrink-0 scrollbar-hide" style={{ maskImage: "linear-gradient(to bottom, transparent 0px, transparent 16px, black 68px)" }}>
+          <div className="pl-14 pr-6 pt-10 pb-8">
 
             {/* ── AI Hero Search ── */}
             <div className="mb-6">
@@ -1081,12 +1116,40 @@ export function ListingsPage() {
                 Find your next home.
               </h2>
 
-              {/* Search input */}
-              <div className={`relative flex items-center bg-[var(--card)] border rounded-2xl transition-all duration-300 ${
-                inputFocused
-                  ? "border-[var(--accent)]/60 shadow-[0_0_0_4px_rgba(232,113,74,0.08),0_4px_24px_rgba(0,0,0,0.07)]"
-                  : "border-[var(--border)] shadow-[0_2px_16px_rgba(0,0,0,0.05)]"
-              }`}>
+              {/* Search input — gradient glow wrapper */}
+              <div
+                className="relative rounded-2xl p-px"
+                style={{
+                  background: "var(--border)",
+                  boxShadow: inputFocused
+                    ? "0 0 32px rgba(200,125,58,0.22), 0 4px 24px rgba(0,0,0,0.07)"
+                    : searchGlowing
+                    ? "0 0 20px rgba(200,125,58,0.13), 0 2px 16px rgba(0,0,0,0.05)"
+                    : "0 2px 16px rgba(0,0,0,0.05)",
+                  transition: "box-shadow 0.6s ease",
+                }}
+                onMouseEnter={() => {
+                  if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
+                  setSearchGlowing(true);
+                }}
+                onMouseLeave={() => {
+                  glowTimeoutRef.current = setTimeout(() => setSearchGlowing(false), 300);
+                }}
+              >
+                {/* Gradient border layer — fades in/out via opacity so no layout shift */}
+                <div
+                  className="absolute inset-0 rounded-2xl pointer-events-none"
+                  style={{
+                    background: "linear-gradient(135deg, #E8714A 0%, #C27D3A 55%, #E8A87C 100%)",
+                    opacity: (searchGlowing || inputFocused) ? 1 : 0,
+                    transition: (searchGlowing || inputFocused)
+                      ? "opacity 0.35s ease"
+                      : "opacity 0.45s ease",
+                  }}
+                />
+                {/* Inner card — always fills the 1px wrapper so size never shifts */}
+                <div className="relative flex items-center bg-[var(--card)] rounded-[15px]">
+
                 {/* Left icon */}
                 <div className="absolute left-4 pointer-events-none">
                   {aiLoading ? (
@@ -1104,7 +1167,7 @@ export function ListingsPage() {
 
                 <input
                   type="text"
-                  placeholder="2BR under $3,500 near Central Park…"
+                  placeholder=""
                   value={q}
                   onChange={(e) => {
                     setQ(e.target.value);
@@ -1115,8 +1178,22 @@ export function ListingsPage() {
                   }}
                   onFocus={() => setInputFocused(true)}
                   onBlur={() => setInputFocused(false)}
-                  className="w-full pl-11 pr-14 py-4 text-[0.875rem] bg-transparent text-[var(--foreground)] placeholder:text-[var(--muted-light)] focus:outline-none rounded-2xl"
+                  className="w-full pl-11 pr-14 py-5 text-[0.875rem] bg-transparent text-[var(--foreground)] focus:outline-none rounded-[15px]"
                 />
+
+                {/* Animated placeholder overlay */}
+                {!q && !inputFocused && (
+                  <span
+                    className="absolute left-11 right-14 text-[0.875rem] pointer-events-none select-none truncate"
+                    style={{
+                      color: "var(--muted-light)",
+                      opacity: promptFading ? 0 : 1,
+                      transition: promptFading ? "opacity 0.3s ease" : "opacity 0.4s ease",
+                    }}
+                  >
+                    {SEARCH_PROMPTS[promptIdx]}
+                  </span>
+                )}
 
                 {/* Right: clear button or ↵ hint */}
                 <div className="absolute right-3.5">
@@ -1132,21 +1209,10 @@ export function ListingsPage() {
                     <span className="text-[10px] text-[var(--muted-light)] border border-[var(--border)] rounded-md px-1.5 py-0.5 font-medium pointer-events-none select-none">↵</span>
                   )}
                 </div>
+
+                </div>
               </div>
 
-              {/* Prompt chips */}
-              <div className="flex flex-wrap gap-2 mt-3">
-                {PROMPT_CHIPS.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => { setQ(chip); handleAiSearch(chip); }}
-                    className="text-[11px] text-[var(--muted)] border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 rounded-full hover:bg-[var(--accent-light)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] transition-all duration-150"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
             </div>
 
 
@@ -1186,7 +1252,7 @@ export function ListingsPage() {
               ) : !loading && !isAiMode && visibleListings.length > 0 ? (
                 <p className="text-sm text-[var(--foreground)] mb-3 leading-relaxed">
                   Found{" "}
-                  <strong>{visibleListings.length.toLocaleString()}</strong> apartments{visibleListings.length > 3 ? " — here are the top picks." : "."}
+                  <strong>{total.toLocaleString()}</strong> apartments{total > 3 ? " — here are the top picks." : "."}
                 </p>
               ) : null}
               <div className="flex items-center gap-2 flex-wrap">
@@ -1268,7 +1334,7 @@ export function ListingsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  {aiResults.map((l, i) => (
+                  {[...new Map(aiResults.map(l => [l.id, l])).values()].map((l, i) => (
                     <div key={l.id} ref={(el) => { if (el) cardRefsMap.current.set(l.id, el); else cardRefsMap.current.delete(l.id); }}>
                       <ListingCard
                         listing={l}
@@ -1335,7 +1401,7 @@ export function ListingsPage() {
         </div>
 
         {/* RIGHT: map */}
-        <div className="hidden md:flex flex-1 pt-6 pl-8 pr-14 pb-8">
+        <div className="hidden md:flex flex-1 pt-10 pl-6 pr-14 pb-8">
           <div className="relative flex-1 rounded-2xl overflow-hidden border border-[var(--border)] shadow-md">
             <MapView
               listings={mapListings}

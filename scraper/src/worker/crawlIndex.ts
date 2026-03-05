@@ -43,10 +43,11 @@ async function processCrawlIndex(job: Job<CrawlIndexJobData>): Promise<void> {
 
     let html: string;
     try {
-      // forceRender=false: lets fetchPage use the FlareSolverr shortcut for known
-      // bot-protected domains (leasebreak, streeteasy, renthop, zillow) when
-      // FLARESOLVERR_URL is set. Rebrowser is only used as a fallback.
-      const result = await fetchPage(currentUrl, false);
+      // Only StreetEasy SRP needs full JS rendering (client-side Next.js app).
+      // Leasebreak and RentHop are server-rendered — FlareSolverr handles them
+      // directly and is much faster (~30s vs ~2 min with rebrowser).
+      const needsFullRender = source === "streeteasy";
+      const result = await fetchPage(currentUrl, needsFullRender);
       html = result.html;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -202,7 +203,7 @@ async function runMissPass(runId: string, source: string, crawlJobId: string): P
 export function startCrawlIndexWorker(): Worker<CrawlIndexJobData> {
   const worker = new Worker<CrawlIndexJobData>("crawl-index", processCrawlIndex, {
     connection,
-    concurrency: 1,
+    concurrency: 3, // Leasebreak + RentHop + StreetEasy can run in parallel
   });
 
   worker.on("completed", (j) => console.log(`[crawl-index] Job ${j.id} completed`));
